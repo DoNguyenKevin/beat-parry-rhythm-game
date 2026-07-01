@@ -14,22 +14,44 @@ const game = new BeatParryGame(canvas);
 
 function buildSongList() {
   songList.innerHTML = '';
-  for (const song of SONGS) {
-    const layers = getSongLayers(song);
-    const card = document.createElement('div');
-    card.className = 'song-card';
-    card.innerHTML = `
-      <div>
-        <div class="name">${song.name}</div>
-        <div class="meta">${song.bpm} BPM · ${song.duration}s</div>
-      </div>
-      <div class="tags">
-        <span class="layers-tag">${layers} layer${layers > 1 ? 's' : ''}</span>
-        <span class="difficulty ${song.difficulty}">${song.difficulty}</span>
-      </div>
+  const grouped = getSongsByLevel();
+
+  for (const level of DIFFICULTY_ORDER) {
+    const songs = grouped[level];
+    if (!songs.length) continue;
+
+    const meta = DIFFICULTY_META[level];
+    const section = document.createElement('div');
+    section.className = 'level-section';
+
+    const header = document.createElement('div');
+    header.className = 'level-header';
+    header.innerHTML = `
+      <span class="level-dot" style="background: ${meta.ballColor}"></span>
+      <span class="level-name">${meta.label}</span>
+      <span class="level-meta">${meta.layers} layer${meta.layers > 1 ? 's' : ''} · ${songs.length} song${songs.length > 1 ? 's' : ''}</span>
     `;
-    card.addEventListener('click', () => startSong(song));
-    songList.appendChild(card);
+    section.appendChild(header);
+
+    const cards = document.createElement('div');
+    cards.className = 'level-songs';
+
+    for (const song of songs) {
+      const card = document.createElement('div');
+      card.className = 'song-card';
+      card.innerHTML = `
+        <div>
+          <div class="name">${song.name}</div>
+          <div class="meta">${song.bpm} BPM · ${song.duration}s</div>
+        </div>
+        <span class="difficulty ${song.difficulty}">${meta.label}</span>
+      `;
+      card.addEventListener('click', () => startSong(song));
+      cards.appendChild(card);
+    }
+
+    section.appendChild(cards);
+    songList.appendChild(section);
   }
 }
 
@@ -82,7 +104,7 @@ function showParryPopup(rating, side, lane) {
   };
 
   const popup = document.createElement('div');
-  popup.className = `parry-popup ${rating}${rating === 'bad' || rating === 'miss' ? ' penalty' : ''}`;
+  popup.className = `parry-popup ${rating}`;
   popup.textContent = labels[rating];
 
   const layers = game.song ? getSongLayers(game.song) : 2;
@@ -125,7 +147,6 @@ document.getElementById('back-btn').addEventListener('click', () => {
 
 buildSongList();
 
-// Draw idle animation on menu
 function idleLoop() {
   if (game.state === 'idle') {
     game.song = SONGS[0];

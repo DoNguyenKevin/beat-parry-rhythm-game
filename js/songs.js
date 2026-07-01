@@ -1,4 +1,38 @@
+const DIFFICULTY_ORDER = ['easy', 'medium', 'hard', 'expert'];
+
+const DIFFICULTY_META = {
+  easy: {
+    label: 'Easy',
+    ballColor: '#ffffff',
+    layers: 1,
+    densityBase: 0.35,
+    densityMax: 0.85,
+  },
+  medium: {
+    label: 'Medium',
+    ballColor: '#ffee00',
+    layers: 2,
+    densityBase: 0.4,
+    densityMax: 0.9,
+  },
+  hard: {
+    label: 'Hard',
+    ballColor: '#ff2222',
+    layers: 2,
+    densityBase: 0.45,
+    densityMax: 0.95,
+  },
+  expert: {
+    label: 'Expert',
+    ballColor: '#cc44ff',
+    layers: 2,
+    densityBase: 0.55,
+    densityMax: 0.98,
+  },
+};
+
 const SONGS = [
+  // Easy
   {
     id: 'neon-pulse',
     name: 'Neon Pulse',
@@ -12,6 +46,19 @@ const SONGS = [
     maxSpeed: 420,
   },
   {
+    id: 'soft-glow',
+    name: 'Soft Glow',
+    bpm: 110,
+    duration: 40,
+    difficulty: 'easy',
+    color: '#88ccff',
+    bassFreq: 50,
+    melodyScale: [0, 4, 7, 11],
+    baseSpeed: 260,
+    maxSpeed: 380,
+  },
+  // Medium
+  {
     id: 'midnight-drive',
     name: 'Midnight Drive',
     bpm: 140,
@@ -23,6 +70,19 @@ const SONGS = [
     baseSpeed: 320,
     maxSpeed: 500,
   },
+  {
+    id: 'starfall',
+    name: 'Starfall',
+    bpm: 128,
+    duration: 50,
+    difficulty: 'medium',
+    color: '#ffd44d',
+    bassFreq: 60,
+    melodyScale: [0, 4, 7, 11],
+    baseSpeed: 300,
+    maxSpeed: 480,
+  },
+  // Hard
   {
     id: 'chaos-engine',
     name: 'Chaos Engine',
@@ -36,16 +96,29 @@ const SONGS = [
     maxSpeed: 600,
   },
   {
-    id: 'starfall',
-    name: 'Starfall',
-    bpm: 128,
-    duration: 50,
-    difficulty: 'medium',
-    color: '#ffd44d',
-    bassFreq: 60,
-    melodyScale: [0, 4, 7, 11],
-    baseSpeed: 300,
-    maxSpeed: 480,
+    id: 'iron-rush',
+    name: 'Iron Rush',
+    bpm: 158,
+    duration: 55,
+    difficulty: 'hard',
+    color: '#ff6644',
+    bassFreq: 70,
+    melodyScale: [0, 2, 5, 7, 10],
+    baseSpeed: 360,
+    maxSpeed: 580,
+  },
+  // Expert
+  {
+    id: 'void-breaker',
+    name: 'Void Breaker',
+    bpm: 185,
+    duration: 70,
+    difficulty: 'expert',
+    color: '#aa44ff',
+    bassFreq: 80,
+    melodyScale: [0, 1, 3, 5, 8, 10, 11],
+    baseSpeed: 420,
+    maxSpeed: 700,
   },
 ];
 
@@ -73,7 +146,20 @@ const RATING_SCORE = {
 };
 
 function getSongLayers(song) {
-  return song.difficulty === 'easy' ? 1 : 2;
+  return DIFFICULTY_META[song.difficulty]?.layers ?? 2;
+}
+
+function getBallColor(song) {
+  if (!song) return DIFFICULTY_META.easy.ballColor;
+  return DIFFICULTY_META[song.difficulty]?.ballColor ?? DIFFICULTY_META.easy.ballColor;
+}
+
+function getSongsByLevel() {
+  const grouped = {};
+  for (const level of DIFFICULTY_ORDER) {
+    grouped[level] = SONGS.filter((s) => s.difficulty === level);
+  }
+  return grouped;
 }
 
 const TIMING_WINDOWS = {
@@ -81,6 +167,16 @@ const TIMING_WINDOWS = {
   good: 35,
   medium: 55,
 };
+
+const EXPERT_TIMING_WINDOWS = {
+  excellent: 14,
+  good: 28,
+  medium: 45,
+};
+
+function getTimingWindows(song) {
+  return song?.difficulty === 'expert' ? EXPERT_TIMING_WINDOWS : TIMING_WINDOWS;
+}
 
 function seededRandom(seed) {
   let s = seed;
@@ -97,30 +193,36 @@ function generateBeatMap(song) {
   const sides = ['left', 'right'];
   const layers = getSongLayers(song);
   const lanes = layers === 1 ? [0] : [0, 1];
+  const meta = DIFFICULTY_META[song.difficulty] || DIFFICULTY_META.medium;
+  const isExpert = song.difficulty === 'expert';
   const rand = seededRandom(song.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0));
 
   for (let beat = 4; beat < totalBeats - 2; beat++) {
     const time = beat * beatInterval;
     const progress = beat / totalBeats;
 
-    let density = 0.35;
-    if (progress > 0.3) density = 0.5;
-    if (progress > 0.5) density = 0.65;
-    if (progress > 0.7) density = 0.8;
-    if (progress > 0.85) density = 0.95;
+    let density = meta.densityBase;
+    if (progress > 0.25) density = meta.densityBase + 0.15;
+    if (progress > 0.45) density = meta.densityBase + 0.3;
+    if (progress > 0.65) density = meta.densityBase + 0.45;
+    if (progress > 0.8) density = meta.densityMax;
 
     if (rand() > density) continue;
 
     const side = sides[Math.floor(rand() * sides.length)];
     const lane = lanes[Math.floor(rand() * lanes.length)];
 
-    if (layers === 2 && progress > 0.6 && rand() < 0.3) {
+    const doubleLaneChance = isExpert ? 0.45 : 0.3;
+    const crossSideChance = isExpert ? 0.35 : 0.25;
+    const offBeatChance = isExpert ? 0.25 : 0.15;
+
+    if (layers === 2 && progress > 0.5 && rand() < doubleLaneChance) {
       notes.push({ time, side, lane: 0 });
       notes.push({ time, side, lane: 1 });
       continue;
     }
 
-    if (layers === 2 && progress > 0.75 && rand() < 0.25) {
+    if (layers === 2 && progress > 0.6 && rand() < crossSideChance) {
       const otherSide = side === 'left' ? 'right' : 'left';
       notes.push({ time, side, lane });
       notes.push({ time, side: otherSide, lane: Math.floor(rand() * 2) });
@@ -129,12 +231,20 @@ function generateBeatMap(song) {
 
     notes.push({ time, side, lane });
 
-    if (layers === 2 && progress > 0.4 && rand() < 0.15 * progress) {
-      const offset = beatInterval * 0.5;
+    if (layers === 2 && progress > 0.35 && rand() < offBeatChance * progress) {
+      const offset = beatInterval * (isExpert && rand() < 0.5 ? 0.25 : 0.5);
       notes.push({
         time: time + offset,
         side: sides[Math.floor(rand() * 2)],
-        lane: lanes[Math.floor(rand() * 2)],
+        lane: lanes[Math.floor(rand() * lanes.length)],
+      });
+    }
+
+    if (isExpert && progress > 0.7 && rand() < 0.2) {
+      notes.push({
+        time: time + beatInterval * 0.75,
+        side: sides[Math.floor(rand() * 2)],
+        lane: lanes[Math.floor(rand() * lanes.length)],
       });
     }
   }
@@ -153,6 +263,6 @@ function getGrade(accuracy) {
 }
 
 function getSpeedForProgress(song, progress) {
-  const eased = progress * progress;
+  const eased = song.difficulty === 'expert' ? progress * progress * progress : progress * progress;
   return song.baseSpeed + (song.maxSpeed - song.baseSpeed) * eased;
 }

@@ -170,10 +170,11 @@ class BeatParryGame {
       return;
     }
 
+    const windows = getTimingWindows(this.song);
     let rating;
-    if (bestDist <= TIMING_WINDOWS.excellent) rating = RATING.EXCELLENT;
-    else if (bestDist <= TIMING_WINDOWS.good) rating = RATING.GOOD;
-    else if (bestDist <= TIMING_WINDOWS.medium) rating = RATING.MEDIUM;
+    if (bestDist <= windows.excellent) rating = RATING.EXCELLENT;
+    else if (bestDist <= windows.good) rating = RATING.GOOD;
+    else if (bestDist <= windows.medium) rating = RATING.MEDIUM;
     else rating = RATING.BAD;
 
     bestNote.hit = true;
@@ -227,11 +228,12 @@ class BeatParryGame {
   spawnParticles(side, lane, rating) {
     const y = this.getLaneY(lane);
     const x = this.centerX + (side === 'left' ? -30 : 30);
-    const shades = {
-      excellent: '#ffffff',
-      good: '#cccccc',
-      medium: '#888888',
-      bad: '#444444',
+    const colors = {
+      excellent: '#ffd700',
+      good: '#4dff88',
+      medium: '#4d9fff',
+      bad: '#ff9944',
+      miss: '#ff4d4d',
     };
     const count = rating === RATING.EXCELLENT ? 16 : 8;
     for (let i = 0; i < count; i++) {
@@ -243,7 +245,7 @@ class BeatParryGame {
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         life: 1,
-        color: shades[rating],
+        color: colors[rating] || '#ffffff',
         size: 3 + Math.random() * 4,
       });
     }
@@ -339,15 +341,30 @@ class BeatParryGame {
 
   drawBackground(ctx) {
     const progress = this.getProgress();
-    const intensity = 0.04 + progress * 0.06;
+    const intensity = 0.1 + progress * 0.15;
     const gradient = ctx.createRadialGradient(
       this.centerX, this.centerY, 0,
       this.centerX, this.centerY, this.lineLength * 0.6
     );
-    gradient.addColorStop(0, `rgba(255,255,255,${intensity})`);
+    const c = this.song?.color || '#ff6b9d';
+    gradient.addColorStop(0, this.hexToRgba(c, intensity));
     gradient.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  ballColorToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
   }
 
   drawLine(ctx) {
@@ -398,29 +415,27 @@ class BeatParryGame {
   drawPlayerBall(ctx) {
     const pulse = 1 + Math.sin(performance.now() * 0.005) * 0.05;
     const r = this.ballRadius * pulse;
+    const ballColor = getBallColor(this.song);
 
     ctx.beginPath();
-    ctx.arc(this.centerX, this.centerY, r + 8, 0, Math.PI * 2);
+    ctx.arc(this.centerX, this.centerY, r + 12, 0, Math.PI * 2);
     const glow = ctx.createRadialGradient(
-      this.centerX, this.centerY, r * 0.5,
-      this.centerX, this.centerY, r + 8
+      this.centerX, this.centerY, r * 0.3,
+      this.centerX, this.centerY, r + 12
     );
-    glow.addColorStop(0, 'rgba(255,255,255,0.25)');
+    glow.addColorStop(0, this.ballColorToRgba(ballColor, 0.7));
     glow.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = glow;
     ctx.fill();
 
     ctx.beginPath();
     ctx.arc(this.centerX, this.centerY, r, 0, Math.PI * 2);
-    const ballGrad = ctx.createRadialGradient(
-      this.centerX - 4, this.centerY - 4, 0,
-      this.centerX, this.centerY, r
-    );
-    ballGrad.addColorStop(0, '#ffffff');
-    ballGrad.addColorStop(0.5, '#aaaaaa');
-    ballGrad.addColorStop(1, '#333333');
-    ctx.fillStyle = ballGrad;
+    ctx.fillStyle = ballColor;
     ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
   }
 
   drawNotes(ctx) {
@@ -431,42 +446,35 @@ class BeatParryGame {
 
       if (note.hit) {
         const scale = 1 + (1 - (performance.now() - note.hitTime) / 300) * 0.5;
-        this.drawBall(ctx, note.x, y, this.ballRadius * scale, alpha, note.rating);
+        this.drawBall(ctx, note.x, y, this.ballRadius * scale, alpha);
       } else {
-        this.drawBall(ctx, note.x, y, this.ballRadius, alpha, null);
+        this.drawBall(ctx, note.x, y, this.ballRadius, alpha);
 
         if (!note.missed && dist < this.hitZone + 20) {
           const glow = 1 - dist / (this.hitZone + 20);
+          const ballColor = getBallColor(this.song);
           ctx.beginPath();
-          ctx.arc(note.x, y, this.ballRadius + 6 * glow, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${glow * 0.15})`;
+          ctx.arc(note.x, y, this.ballRadius + 8 * glow, 0, Math.PI * 2);
+          ctx.fillStyle = this.ballColorToRgba(ballColor, glow * 0.35);
           ctx.fill();
         }
       }
     }
   }
 
-  drawBall(ctx, x, y, r, alpha, rating) {
+  drawBall(ctx, x, y, r, alpha) {
     ctx.save();
     ctx.globalAlpha = alpha;
 
-    const shade = rating === 'excellent' ? '#ffffff'
-      : rating === 'good' ? '#cccccc'
-      : rating === 'medium' ? '#888888'
-      : rating === 'bad' ? '#555555'
-      : '#aaaaaa';
+    const ballColor = getBallColor(this.song);
 
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
-    const grad = ctx.createRadialGradient(x - 3, y - 3, 0, x, y, r);
-    grad.addColorStop(0, '#ffffff');
-    grad.addColorStop(0.4, shade);
-    grad.addColorStop(1, '#222222');
-    ctx.fillStyle = grad;
+    ctx.fillStyle = ballColor;
     ctx.fill();
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2;
     ctx.stroke();
     ctx.restore();
   }
