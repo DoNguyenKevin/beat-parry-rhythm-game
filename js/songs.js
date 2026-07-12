@@ -146,6 +146,7 @@ const RATING_SCORE = {
 };
 
 function getSongLayers(song) {
+  if (song.trainingLayers != null) return song.trainingLayers;
   return DIFFICULTY_META[song.difficulty]?.layers ?? 2;
 }
 
@@ -174,7 +175,14 @@ const EXPERT_TIMING_WINDOWS = {
   medium: 45,
 };
 
+const TRAINING_TIMING_WINDOWS = {
+  excellent: 28,
+  good: 50,
+  medium: 75,
+};
+
 function getTimingWindows(song) {
+  if (song?.isTraining) return TRAINING_TIMING_WINDOWS;
   return song?.difficulty === 'expert' ? EXPERT_TIMING_WINDOWS : TIMING_WINDOWS;
 }
 

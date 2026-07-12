@@ -8,21 +8,80 @@
 </head>
 <body>
   <div id="app">
+    <div id="rud-wallet" class="rud-wallet">
+      <svg class="rud-coin" viewBox="0 0 32 32" aria-hidden="true">
+        <defs>
+          <linearGradient id="rud-coin-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ffe566"/>
+            <stop offset="100%" stop-color="#ffb800"/>
+          </linearGradient>
+        </defs>
+        <circle cx="16" cy="16" r="14" fill="url(#rud-coin-grad)" stroke="#cc9900" stroke-width="1.5"/>
+        <circle cx="16" cy="16" r="10" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
+        <text x="16" y="21" text-anchor="middle" font-size="11" font-weight="800" fill="#8b6914" font-family="Segoe UI, sans-serif">R</text>
+      </svg>
+      <div class="rud-info">
+        <span class="rud-label">RUD</span>
+        <span id="rud-balance">0</span>
+        <button type="button" id="user-name-btn" class="user-name-btn" title="Change player">Player</button>
+      </div>
+    </div>
+
+    <div id="user-modal" class="user-modal hidden">
+      <div class="user-modal-card">
+        <h2>Choose your name</h2>
+        <p>RUD balance is saved per player in the SQLite database.</p>
+        <form id="user-form">
+          <input type="text" id="username-input" maxlength="20" placeholder="Username" autocomplete="username" required />
+          <button type="submit" class="btn">Play</button>
+        </form>
+        <p id="user-form-error" class="user-form-error hidden"></p>
+      </div>
+    </div>
+
     <canvas id="game-canvas"></canvas>
 
     <div id="menu" class="screen active">
       <h1>Beat Parry</h1>
       <p class="subtitle">Parry the beat. Master the line.</p>
-      <div id="song-list"></div>
+
+      <div class="menu-tabs">
+        <button type="button" id="tab-play" class="menu-tab active">Play</button>
+        <button type="button" id="tab-training" class="menu-tab">Training</button>
+        <button type="button" id="tab-dodge" class="menu-tab">Dodge</button>
+        <button type="button" id="tab-sounds" class="menu-tab">Sounds</button>
+      </div>
+
+      <div id="play-panel" class="menu-panel">
+        <div id="song-list"></div>
+      </div>
+
+      <div id="training-panel" class="menu-panel hidden">
+        <p class="training-intro">Endless practice — starts at Level 3, gets harder every 9 seconds. Press <kbd>ESC</kbd> to quit.</p>
+        <div id="training-list"></div>
+      </div>
+
+      <div id="dodge-panel" class="menu-panel hidden">
+        <p class="training-intro">Move your cursor to dodge bullets. Earn RUD when you quit (ESC). Higher level and more dodges = more RUD. 60 levels — ramps every 4 seconds.</p>
+        <div id="dodge-list"></div>
+      </div>
+
+      <div id="sounds-panel" class="menu-panel hidden">
+        <p class="sounds-intro">Choose a parry sound pack. Default uses the classic in-game tones.</p>
+        <div id="sound-list" class="sound-list"></div>
+        <button type="button" id="sound-reset-btn" class="btn btn-secondary sound-reset-btn">Reset to Normal Sound</button>
+      </div>
+
       <div class="controls-hint">
         <span><kbd>F</kbd> <kbd>J</kbd> — Easy (1 layer)</span>
         <span><kbd>F</kbd> <kbd>G</kbd> Left · <kbd>J</kbd> <kbd>K</kbd> Right — Medium+ (2 layers)</span>
-        <span class="layer-note">Ball color: White · Yellow · Red · Purple by level</span>
-        <span class="layer-note">Bad parries cost −150 points and break your combo</span>
       </div>
     </div>
 
     <div id="hud" class="hidden">
+      <div id="training-badge" class="training-badge hidden">TRAINING</div>
+      <div id="dodge-badge" class="training-badge dodge-badge hidden">DODGE</div>
+      <div id="training-level-hud" class="training-level-hud hidden">Level 1</div>
       <div class="hud-score">
         <span class="label">Score</span>
         <span id="score">0</span>
@@ -38,11 +97,15 @@
     </div>
 
     <div id="results" class="screen hidden">
-      <h2>Song Complete</h2>
+      <h2 id="results-title">Song Complete</h2>
       <div id="grade" class="grade">S</div>
+      <p id="training-summary-line" class="training-summary-line hidden"></p>
+      <div id="rud-earned" class="rud-earned hidden"></div>
       <div class="stats">
         <div><span>Score</span><strong id="final-score">0</strong></div>
         <div><span>Accuracy</span><strong id="final-accuracy">0%</strong></div>
+        <div id="stat-level-wrap" class="hidden"><span>Max Level</span><strong id="stat-level">1</strong></div>
+        <div id="stat-time-wrap" class="hidden"><span>Time</span><strong id="stat-time">0s</strong></div>
         <div><span>Excellent</span><strong id="stat-excellent">0</strong></div>
         <div><span>Good</span><strong id="stat-good">0</strong></div>
         <div><span>Medium</span><strong id="stat-medium">0</strong></div>
@@ -50,15 +113,21 @@
         <div><span>Miss</span><strong id="stat-miss">0</strong></div>
         <div><span>Max Combo</span><strong id="stat-max-combo">0</strong></div>
       </div>
-      <button id="back-btn" class="btn">Back to Menu</button>
+      <div class="results-actions">
+        <button type="button" id="retry-btn" class="btn btn-secondary hidden">Try Again</button>
+        <button type="button" id="back-btn" class="btn">Back to Menu</button>
+      </div>
     </div>
 
     <div id="flash-overlay"></div>
   </div>
 
-  <script src="js/songs.js"></script>
-  <script src="js/audio.js"></script>
-  <script src="js/game.js"></script>
-  <script src="js/main.js"></script>
+  <script src="js/songs.js?v=5"></script>
+  <script src="js/currency.js?v=5"></script>
+  <script src="js/training.js?v=5"></script>
+  <script src="js/dodge.js?v=5"></script>
+  <script src="js/audio.js?v=5"></script>
+  <script src="js/game.js?v=5"></script>
+  <script src="js/main.js?v=5"></script>
 </body>
 </html>

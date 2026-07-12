@@ -26,14 +26,84 @@ class BeatParryGame {
 
     this.screenShake = 0;
     this.lastTime = 0;
-    this.animationId = null;
+    this.renderLoopId = null;
+
+    this.trainingMode = false;
+    this.dodgeMode = false;
+    this.playMode = 'idle';
+    this.speedMult = 1;
+
+    this.playerX = 0;
+    this.playerY = 0;
+    this.dodgeBullets = [];
+    this.dodgeNextSpawn = 0.8;
+    this.dodgeInvincibleUntil = 0;
+    this.dodgeClockStart = 0;
+    this.dodgeNextSpawnMs = 0;
+    this.dodgeInvincibleUntilMs = 0;
 
     this.onComplete = null;
     this.onScoreUpdate = null;
+    this.onTrainingExit = null;
+    this.onTrainingRestart = null;
 
     this.resize();
+    this._lastPointer = { x: null, y: null };
+    this._onPointerMove = (e) => {
+      this._lastPointer.x = e.clientX;
+      this._lastPointer.y = e.clientY;
+      this.handlePointerMove(e);
+    };
     window.addEventListener('resize', () => this.resize());
     window.addEventListener('keydown', (e) => this.handleKeyDown(e));
+    window.addEventListener('pointermove', this._onPointerMove);
+    this.beginRenderLoop();
+  }
+
+  beginRenderLoop() {
+    const frame = () => {
+      this.renderLoopId = requestAnimationFrame(frame);
+      if (this.state === 'idle') {
+        this.drawIdlePreview();
+      } else if (this.state === 'playing') {
+        this.tickPlaying();
+      }
+    };
+    this.renderLoopId = requestAnimationFrame(frame);
+  }
+
+  clearModeState() {
+    this.playMode = 'idle';
+    this.dodgeMode = false;
+    this.trainingMode = false;
+    this.endlessMode = false;
+    this.dodgeBullets = [];
+    this.notes = [];
+    this.particles = [];
+    this.dodgeInvincibleUntilMs = 0;
+    this._lastDodgeScoreTick = undefined;
+  }
+
+  resetRoundState() {
+    this.dodgeBullets = [];
+    this.notes = [];
+    this.particles = [];
+    this.dodgeInvincibleUntilMs = 0;
+    this._lastDodgeScoreTick = undefined;
+    this.noteIndex = 0;
+    this.score = 0;
+    this.combo = 0;
+    this.maxCombo = 0;
+    this.stats = { excellent: 0, good: 0, medium: 0, bad: 0, miss: 0 };
+    this.spawnBeatCounter = 0;
+    this.nextSpawnTime = 0.8;
+    this.dodgeNextSpawn = 0.8;
+    this.dodgeInvincibleUntil = 0;
+  }
+
+  drawIdlePreview() {
+    if (!SONGS || !SONGS.length) return;
+    this.renderParryScene(SONGS[0]);
   }
 
   resize() {
@@ -42,44 +112,109 @@ class BeatParryGame {
     this.centerX = this.canvas.width / 2;
     this.centerY = this.canvas.height / 2;
     this.lineLength = Math.min(this.canvas.width * 0.85, 900);
+    if (this.playerX === 0 && this.playerY === 0) {
+      this.playerX = this.centerX;
+      this.playerY = this.centerY;
+    }
   }
 
-  start(song) {
+  updatePlayerFromClient(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
+    this.playerX = (clientX - rect.left) * scaleX;
+    this.playerY = (clientY - rect.top) * scaleY;
+  }
+
+  handlePointerMove(e) {
+    if (this.state !== 'playing' || this.playMode !== 'dodge') return;
+    this.updatePlayerFromClient(e.clientX, e.clientY);
+  }
+
+  start(song, options = {}) {
+    audioEngine.stop();
+
+    const isDodge = !!options.dodge;
+    const isTraining = !!options.training && !isDodge;
+    this.playMode = isDodge ? 'dodge' : 'parry';
+    this.dodgeMode = isDodge;
+    this.trainingMode = isTraining;
+    this.endlessMode = isDodge || (isTraining && !!song.endless);
     this.song = song;
-    this.beatMap = generateBeatMap(song);
-    this.totalNotes = this.beatMap.length;
-    this.noteIndex = 0;
-    this.notes = [];
-    this.particles = [];
-    this.score = 0;
-    this.combo = 0;
-    this.maxCombo = 0;
-    this.stats = { excellent: 0, good: 0, medium: 0, bad: 0, miss: 0 };
+    this.speedMult = song.speedMult || 1;
+    this.trainingLevel = isDodge ? (song.startLevel || 1) : (song.startLevel || 3);
+
+    this.resetRoundState();
+
+    if (this.endlessMode) {
+      this.beatMap = [];
+      this.totalNotes = 0;
+    } else {
+      this.beatMap = generateBeatMap(song);
+      this.totalNotes = this.beatMap.length;
+    }
+
+    this.playerX = this.centerX;
+    this.playerY = this.centerY;
+    if (isDodge) {
+      this.dodgeClockStart = performance.now();
+      this.dodgeNextSpawnMs = this.dodgeClockStart + 800;
+      if (this._lastPointer.x != null) {
+        this.updatePlayerFromClient(this._lastPointer.x, this._lastPointer.y);
+      }
+    }
+
     this.state = 'playing';
     this.lastTime = performance.now();
+    this.canvas.classList.toggle('dodge-cursor', isDodge);
+    this.canvas.dataset.playMode = this.playMode;
 
     audioEngine.playSong(song);
-    this.loop();
   }
 
   stop() {
     this.state = 'idle';
-    if (this.animationId) {
-      cancelAnimationFrame(this.animationId);
-      this.animationId = null;
-    }
+    this.canvas.classList.remove('dodge-cursor');
+    delete this.canvas.dataset.playMode;
     audioEngine.stop();
+    this.clearModeState();
+  }
+
+  getDodgeElapsed() {
+    return (performance.now() - this.dodgeClockStart) / 1000;
   }
 
   getProgress() {
     if (!this.song) return 0;
+    if (this.endlessMode) {
+      if (this.playMode === 'dodge') {
+        return (this.getDodgeElapsed() % 12) / 12;
+      }
+      return ((audioEngine.getCurrentTime() % 12) / 12);
+    }
     const t = audioEngine.getCurrentTime();
     return Math.min(t / this.song.duration, 1);
   }
 
+  getTrainingLevel() {
+    if (!this.endlessMode) return 1;
+    const startLevel = this.song.startLevel || (this.dodgeMode ? 1 : 3);
+    if (this.playMode === 'dodge') return getDodgeLevel(this.getDodgeElapsed(), startLevel);
+    return getTrainingLevel(audioEngine.getCurrentTime(), startLevel);
+  }
+
   spawnNotes(currentTime) {
+    if (this.playMode === 'dodge') {
+      this.spawnDodgeBullets();
+      return;
+    }
+    if (this.endlessMode) {
+      this.spawnEndlessNotes(currentTime);
+      return;
+    }
+
     const progress = this.getProgress();
-    const speed = getSpeedForProgress(this.song, progress);
+    const speed = this.getNoteSpeed(progress);
     const spawnLead = (this.lineLength / 2) / speed;
 
     while (this.noteIndex < this.beatMap.length) {
@@ -101,9 +236,114 @@ class BeatParryGame {
     }
   }
 
+  spawnEndlessNotes(currentTime) {
+    const startLevel = this.song.startLevel || 3;
+    this.trainingLevel = getTrainingLevel(currentTime, startLevel);
+    const level = this.trainingLevel;
+    const layers = getSongLayers(this.song);
+    const speed = getEndlessSpeed(this.song, level);
+    const spawnLead = (this.lineLength / 2) / speed;
+    const interval = getEndlessSpawnInterval(level, this.song.bpm);
+
+    while (this.nextSpawnTime <= currentTime + spawnLead) {
+      const pattern = pickEndlessNotes(level, layers, this.spawnBeatCounter);
+      for (const { side, lane } of pattern) {
+        this.notes.push({
+          side,
+          lane,
+          spawnTime: this.nextSpawnTime,
+          x: side === 'left'
+            ? this.centerX - this.lineLength / 2
+            : this.centerX + this.lineLength / 2,
+          hit: false,
+          missed: false,
+          rating: null,
+        });
+        this.totalNotes++;
+      }
+      this.spawnBeatCounter++;
+      this.nextSpawnTime += interval;
+    }
+  }
+
+  spawnDodgeBullets() {
+    const nowMs = performance.now();
+    const elapsed = this.getDodgeElapsed();
+    const startLevel = this.song.startLevel || 1;
+    this.trainingLevel = getDodgeLevel(elapsed, startLevel);
+    const level = this.trainingLevel;
+    const interval = getDodgeSpawnInterval(level);
+    const warningMs = getDodgeWarningDuration(level) * 1000;
+    const speed = getDodgeBulletSpeed(level);
+    const burst = getDodgeBurstCount(level);
+
+    while (this.dodgeNextSpawnMs <= nowMs + warningMs + 50) {
+      for (let i = 0; i < burst; i++) {
+        const spawn = pickDodgeBullet(this.canvas, this.playerX, this.playerY, i, level);
+        this.dodgeBullets.push({
+          x: spawn.x,
+          y: spawn.y,
+          angle: spawn.angle,
+          length: spawn.length,
+          radius: spawn.radius,
+          speed,
+          warningStartMs: this.dodgeNextSpawnMs,
+          warningDurationMs: warningMs,
+          fireTimeMs: this.dodgeNextSpawnMs + warningMs,
+          state: 'warning',
+          hit: false,
+        });
+        this.totalNotes++;
+      }
+      this.dodgeNextSpawnMs += interval * 1000;
+    }
+  }
+
+  getNoteSpeed(progress) {
+    if (this.endlessMode) {
+      return getEndlessSpeed(this.song, this.trainingLevel || 1);
+    }
+    return getSpeedForProgress(this.song, progress) * this.speedMult;
+  }
+
+  getTrainingSummary() {
+    const elapsed = this.playMode === 'dodge' ? this.getDodgeElapsed() : audioEngine.getCurrentTime();
+    const hitCount = this.playMode === 'dodge'
+      ? this.stats.excellent
+      : this.stats.excellent + this.stats.good + this.stats.medium + this.stats.bad;
+    const weighted = this.playMode === 'dodge'
+      ? this.stats.excellent * 100
+      : this.stats.excellent * 100 +
+        this.stats.good * 75 +
+        this.stats.medium * 50;
+    const divisor = this.playMode === 'dodge'
+      ? Math.max(1, this.stats.excellent + this.stats.miss)
+      : Math.max(1, hitCount);
+    const accuracy = Math.max(0, Math.min(100, Math.round(weighted / divisor)));
+
+    return {
+      score: this.score,
+      accuracy,
+      grade: null,
+      stats: { ...this.stats },
+      maxCombo: this.maxCombo,
+      training: this.playMode === 'dodge' || this.trainingMode,
+      dodge: this.playMode === 'dodge',
+      trainingLevel: this.trainingLevel,
+      timeSurvived: Math.floor(elapsed),
+      notesHit: hitCount,
+      songId: this.song?.id || null,
+    };
+  }
+
   updateNotes(dt, currentTime) {
+    if (this.playMode === 'dodge') {
+      this.updateDodgeBullets(dt, performance.now());
+      return;
+    }
+
     const progress = this.getProgress();
-    const speed = getSpeedForProgress(this.song, progress);
+    const speed = this.getNoteSpeed(progress);
 
     for (const note of this.notes) {
       if (note.hit || note.missed) continue;
@@ -137,9 +377,110 @@ class BeatParryGame {
     });
   }
 
+  updateDodgeBullets(dt, nowMs) {
+    const level = this.trainingLevel || 1;
+    this.score += Math.floor(dt * (12 + level * 2));
+
+    for (const bullet of this.dodgeBullets) {
+      if (bullet.hit) continue;
+
+      if (bullet.state === 'warning' && nowMs >= bullet.fireTimeMs) {
+        bullet.state = 'firing';
+      }
+
+      if (bullet.state === 'firing') {
+        const prevX = bullet.x;
+        const prevY = bullet.y;
+        const move = bullet.speed * dt;
+        bullet.x += Math.cos(bullet.angle) * move;
+        bullet.y += Math.sin(bullet.angle) * move;
+        bullet.traveled = (bullet.traveled || 0) + move;
+
+        const offScreen =
+          bullet.x < -60 || bullet.x > this.canvas.width + 60 ||
+          bullet.y < -60 || bullet.y > this.canvas.height + 60 ||
+          (bullet.traveled || 0) > bullet.length;
+
+        if (offScreen) {
+          bullet.state = 'done';
+          this.stats.excellent++;
+          this.combo++;
+          this.maxCombo = Math.max(this.maxCombo, this.combo);
+          continue;
+        }
+
+        if (nowMs >= this.dodgeInvincibleUntilMs) {
+          const hitR = bullet.radius + this.ballRadius;
+          if (segmentHitsCircle(prevX, prevY, bullet.x, bullet.y, this.playerX, this.playerY, hitR)) {
+            bullet.hit = true;
+            bullet.hitTime = nowMs;
+            bullet.state = 'done';
+            this.registerDodgeHit();
+            this.spawnDodgeHitParticles();
+          }
+        }
+      }
+    }
+
+    this.dodgeBullets = this.dodgeBullets.filter((b) => {
+      if (b.hit) return nowMs - (b.hitTime || 0) < 400;
+      return b.state !== 'done';
+    });
+  }
+
+  spawnDodgeHitParticles() {
+    for (let i = 0; i < 12; i++) {
+      const angle = (Math.PI * 2 * i) / 12 + Math.random() * 0.5;
+      const speed = 100 + Math.random() * 150;
+      this.particles.push({
+        x: this.playerX,
+        y: this.playerY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        color: '#ff4444',
+        size: 4 + Math.random() * 4,
+      });
+    }
+  }
+
+  registerDodgeHit() {
+    this.stats.miss++;
+    this.combo = 0;
+    this.score = Math.max(0, this.score - 25);
+    this.dodgeInvincibleUntilMs = performance.now() + 600;
+    audioEngine.playParrySound('miss');
+    this.screenShake = 8;
+
+    if (this.onScoreUpdate) {
+      this.onScoreUpdate({
+        score: this.score,
+        combo: this.combo,
+        rating: RATING.MISS,
+        side: null,
+        lane: null,
+      });
+    }
+  }
+
   handleKeyDown(e) {
     if (this.state !== 'playing') return;
+
     const key = e.key.toLowerCase();
+    if (key === 'escape') {
+      e.preventDefault();
+      if ((this.trainingMode || this.playMode === 'dodge') && this.onTrainingExit) {
+        this.onTrainingExit();
+      }
+      return;
+    }
+    if (key === 'r' && (this.trainingMode || this.playMode === 'dodge')) {
+      e.preventDefault();
+      if (this.onTrainingRestart) this.onTrainingRestart();
+      return;
+    }
+    if (this.playMode === 'dodge') return;
+
     if (!KEY_MAP[key]) return;
 
     const layers = getSongLayers(this.song);
@@ -193,19 +534,23 @@ class BeatParryGame {
     this.stats[rating]++;
 
     if (rating === RATING.MISS) {
-      this.combo = 0;
+      if (!this.trainingMode) this.combo = 0;
       if (note) note.missTime = performance.now();
-      this.score = Math.max(0, this.score + RATING_SCORE.miss);
+      if (!this.trainingMode) {
+        this.score = Math.max(0, this.score + RATING_SCORE.miss);
+      }
       audioEngine.playParrySound('miss');
-      this.screenShake = 6;
+      this.screenShake = this.trainingMode ? 2 : 6;
     } else if (rating === RATING.BAD) {
-      this.combo = 0;
-      this.score = Math.max(0, this.score + RATING_SCORE.bad);
+      if (!this.trainingMode) {
+        this.combo = 0;
+        this.score = Math.max(0, this.score + RATING_SCORE.bad);
+      }
       audioEngine.playParrySound(rating);
-      this.screenShake = 5;
+      this.screenShake = this.trainingMode ? 2 : 5;
       this.spawnParticles(side, lane, rating);
     } else {
-      const comboBonus = Math.min(this.combo * 2, 50);
+      const comboBonus = this.trainingMode ? 0 : Math.min(this.combo * 2, 50);
       this.score += RATING_SCORE[rating] + comboBonus;
       this.combo++;
       this.maxCombo = Math.max(this.maxCombo, this.combo);
@@ -270,6 +615,8 @@ class BeatParryGame {
   }
 
   checkComplete(currentTime) {
+    if (this.endlessMode) return;
+
     if (currentTime >= this.song.duration + 1) {
       this.state = 'complete';
       this.stop();
@@ -278,8 +625,8 @@ class BeatParryGame {
         this.stats.excellent * 100 +
         this.stats.good * 75 +
         this.stats.medium * 50 +
-        this.stats.bad * -25 +
-        this.stats.miss * -50;
+        this.stats.bad * (this.trainingMode ? 0 : -25) +
+        this.stats.miss * (this.trainingMode ? 0 : -50);
       const accuracy = this.totalNotes > 0
         ? Math.max(0, Math.min(100, Math.round(weighted / this.totalNotes)))
         : 0;
@@ -288,38 +635,67 @@ class BeatParryGame {
         this.onComplete({
           score: this.score,
           accuracy,
-          grade: getGrade(accuracy),
+          grade: this.trainingMode ? null : getGrade(accuracy),
           stats: { ...this.stats },
           maxCombo: this.maxCombo,
+          training: this.trainingMode,
         });
       }
     }
   }
 
-  loop() {
-    if (this.state !== 'playing') return;
-
+  tickPlaying() {
     const now = performance.now();
     const dt = Math.min((now - this.lastTime) / 1000, 0.05);
     this.lastTime = now;
 
-    const currentTime = audioEngine.getCurrentTime();
-    this.spawnNotes(currentTime);
-    this.updateNotes(dt, currentTime);
-    this.updateParticles(dt);
-    this.updateKeyFlash(dt);
+    try {
+      const currentTime = audioEngine.getCurrentTime();
+      this.spawnNotes(currentTime);
+      this.updateNotes(dt, currentTime);
+      this.updateParticles(dt);
+      this.updateKeyFlash(dt);
 
-    if (this.screenShake > 0) {
-      this.screenShake = Math.max(0, this.screenShake - dt * 20);
+      if (this.screenShake > 0) {
+        this.screenShake = Math.max(0, this.screenShake - dt * 20);
+      }
+
+      this.checkComplete(currentTime);
+
+      if (this.playMode === 'dodge' && this.onScoreUpdate) {
+        const tick = Math.floor(this.getDodgeElapsed());
+        if (tick !== this._lastDodgeScoreTick) {
+          this._lastDodgeScoreTick = tick;
+          this.onScoreUpdate({
+            score: this.score,
+            combo: this.combo,
+            rating: null,
+            side: null,
+            lane: null,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[BeatParryGame] update failed:', err);
     }
 
-    this.draw();
-    this.checkComplete(currentTime);
-
-    this.animationId = requestAnimationFrame(() => this.loop());
+    try {
+      this.draw();
+    } catch (err) {
+      console.error('[BeatParryGame] draw failed:', err);
+    }
   }
 
   draw() {
+    if (this.playMode === 'dodge') {
+      this.renderDodgeScene();
+      return;
+    }
+    this.renderParryScene(this.song);
+  }
+
+  renderParryScene(song) {
+    if (!song) return;
     const ctx = this.ctx;
     const shakeX = (Math.random() - 0.5) * this.screenShake;
     const shakeY = (Math.random() - 0.5) * this.screenShake;
@@ -328,6 +704,8 @@ class BeatParryGame {
     ctx.translate(shakeX, shakeY);
     ctx.clearRect(-50, -50, this.canvas.width + 100, this.canvas.height + 100);
 
+    const prevSong = this.song;
+    this.song = song;
     this.drawBackground(ctx);
     this.drawLine(ctx);
     this.drawLaneGuides(ctx);
@@ -335,8 +713,53 @@ class BeatParryGame {
     this.drawNotes(ctx);
     this.drawParticles(ctx);
     this.drawKeyIndicators(ctx);
+    if (this.trainingMode) this.drawTrainingHints(ctx);
+    this.song = prevSong;
 
     ctx.restore();
+  }
+
+  renderDodgeScene() {
+    const ctx = this.ctx;
+    const shakeX = (Math.random() - 0.5) * this.screenShake;
+    const shakeY = (Math.random() - 0.5) * this.screenShake;
+
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+    ctx.clearRect(-50, -50, this.canvas.width + 100, this.canvas.height + 100);
+
+    this.drawDodgeBackground(ctx);
+    this.drawDodgeWarnings(ctx);
+    this.drawDodgeBullets(ctx);
+    this.drawDodgePlayer(ctx);
+    this.drawParticles(ctx);
+    this.drawDodgeHints(ctx);
+
+    ctx.restore();
+  }
+
+  drawTrainingHints(ctx) {
+    ctx.font = 'bold 16px Segoe UI, sans-serif';
+    ctx.textAlign = 'center';
+
+    for (const note of this.notes) {
+      if (note.hit || note.missed) continue;
+      const dist = Math.abs(note.x - this.centerX);
+      if (dist > this.lineLength * 0.45) continue;
+
+      const y = this.getLaneY(note.lane);
+      const key = getKeyForNote(note.side, note.lane);
+      const alpha = 0.4 + (1 - dist / (this.lineLength * 0.45)) * 0.6;
+
+      ctx.fillStyle = `rgba(77, 255, 136, ${alpha})`;
+      ctx.fillText(key, note.x, y - 22);
+    }
+
+    ctx.font = '600 11px Segoe UI, sans-serif';
+    ctx.fillStyle = 'rgba(136, 136, 170, 0.7)';
+    ctx.textAlign = 'left';
+    const levelText = `Level ${this.trainingLevel} · ESC quit · R restart`;
+    ctx.fillText(levelText, 16, this.canvas.height - 16);
   }
 
   drawBackground(ctx) {
@@ -346,7 +769,7 @@ class BeatParryGame {
       this.centerX, this.centerY, 0,
       this.centerX, this.centerY, this.lineLength * 0.6
     );
-    const c = this.song?.color || '#ff6b9d';
+    const c = this.trainingMode ? '#4dff88' : (this.song?.color || '#ff6b9d');
     gradient.addColorStop(0, this.hexToRgba(c, intensity));
     gradient.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = gradient;
@@ -512,5 +935,119 @@ class BeatParryGame {
       ctx.fillStyle = `rgba(255,255,255,${0.3 + flash * 0.7})`;
       ctx.fillText(key.toUpperCase(), x, y);
     }
+  }
+
+  drawDodgeBackground(ctx) {
+    const level = this.trainingLevel || 1;
+    const intensity = 0.08 + Math.min(level / DODGE_MAX_LEVEL, 1) * 0.12;
+    const gradient = ctx.createRadialGradient(
+      this.playerX, this.playerY, 0,
+      this.playerX, this.playerY, Math.min(this.canvas.width, this.canvas.height) * 0.5
+    );
+    const c = this.song?.color || '#ff6b6b';
+    gradient.addColorStop(0, this.hexToRgba(c, intensity));
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  drawDodgeWarnings(ctx) {
+    const nowMs = performance.now();
+
+    for (const bullet of this.dodgeBullets) {
+      if (bullet.state !== 'warning') continue;
+
+      const elapsed = nowMs - bullet.warningStartMs;
+      if (elapsed < 0) continue;
+
+      const t = Math.min(1, elapsed / bullet.warningDurationMs);
+      const glow = t * t;
+      const alpha = 0.2 + glow * 0.8;
+      const lineWidth = 1.5 + glow * 4.5;
+
+      const endX = bullet.x + Math.cos(bullet.angle) * bullet.length;
+      const endY = bullet.y + Math.sin(bullet.angle) * bullet.length;
+
+      ctx.save();
+      ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+      ctx.lineWidth = lineWidth;
+      ctx.shadowColor = `rgba(255, 255, 255, ${0.3 + glow * 0.7})`;
+      ctx.shadowBlur = 4 + glow * 20;
+      ctx.beginPath();
+      ctx.moveTo(bullet.x, bullet.y);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  drawDodgeBullets(ctx) {
+    for (const bullet of this.dodgeBullets) {
+      if (bullet.state !== 'firing' || bullet.hit) continue;
+
+      const trailX = bullet.x - Math.cos(bullet.angle) * 18;
+      const trailY = bullet.y - Math.sin(bullet.angle) * 18;
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 80, 80, 0.5)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(trailX, trailY);
+      ctx.lineTo(bullet.x, bullet.y);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+      ctx.fillStyle = '#ff4444';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  drawDodgePlayer(ctx) {
+    const invincible = performance.now() < this.dodgeInvincibleUntilMs;
+    const pulse = 1 + Math.sin(performance.now() * 0.008) * 0.06;
+    const r = this.ballRadius * pulse;
+    const color = this.song?.color || '#ff6b6b';
+
+    if (invincible) {
+      ctx.save();
+      ctx.globalAlpha = 0.5 + Math.sin(performance.now() * 0.02) * 0.3;
+    }
+
+    ctx.beginPath();
+    ctx.arc(this.playerX, this.playerY, r + 14, 0, Math.PI * 2);
+    const glow = ctx.createRadialGradient(
+      this.playerX, this.playerY, r * 0.2,
+      this.playerX, this.playerY, r + 14
+    );
+    glow.addColorStop(0, this.ballColorToRgba(color, 0.65));
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(this.playerX, this.playerY, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    if (invincible) ctx.restore();
+  }
+
+  drawDodgeHints(ctx) {
+    ctx.font = '600 11px Segoe UI, sans-serif';
+    ctx.fillStyle = 'rgba(136, 136, 170, 0.7)';
+    ctx.textAlign = 'left';
+    ctx.fillText(
+      `Build v5 · Level ${this.trainingLevel} · Move cursor to dodge · ESC quit · R restart`,
+      16,
+      this.canvas.height - 16
+    );
   }
 }

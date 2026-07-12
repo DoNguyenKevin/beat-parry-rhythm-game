@@ -1,3 +1,12 @@
+const PARRY_PROFILE_KEY = 'beatParrySoundProfile';
+
+const PARRY_SOUND_PROFILES = {
+  default: { id: 'default', label: 'Normal', description: 'Classic parry tones' },
+  creamy: { id: 'creamy', label: 'Creamy Keycap', description: 'Soft, muted thock' },
+  blue: { id: 'blue', label: 'Blue Switch Keycap', description: 'Clicky tactile bump' },
+  red: { id: 'red', label: 'Red Switch Keycap', description: 'Smooth linear press' },
+};
+
 class AudioEngine {
   constructor() {
     this.ctx = null;
@@ -9,6 +18,41 @@ class AudioEngine {
     this.startTime = 0;
     this.song = null;
     this.onBeat = null;
+    this.parryProfile = 'default';
+    this.parryBuffers = {};
+    this.parryLoadPromise = null;
+    this.loadStoredProfile();
+  }
+
+  loadStoredProfile() {
+    const stored = localStorage.getItem(PARRY_PROFILE_KEY);
+    if (stored && PARRY_SOUND_PROFILES[stored]) {
+      this.parryProfile = stored;
+    }
+  }
+
+  getParryProfile() {
+    return this.parryProfile;
+  }
+
+  getParryProfileInfo() {
+    return PARRY_SOUND_PROFILES[this.parryProfile] || PARRY_SOUND_PROFILES.default;
+  }
+
+  setParryProfile(profileId) {
+    if (!PARRY_SOUND_PROFILES[profileId]) return;
+    this.parryProfile = profileId;
+    localStorage.setItem(PARRY_PROFILE_KEY, profileId);
+    this.parryBuffers = {};
+    this.parryLoadPromise = null;
+    if (profileId !== 'default') {
+      return this.loadParrySounds(profileId);
+    }
+    return Promise.resolve();
+  }
+
+  resetParryProfile() {
+    return this.setParryProfile('default');
   }
 
   init() {
@@ -27,12 +71,47 @@ class AudioEngine {
     this.sfxGain.connect(this.masterGain);
   }
 
+  loadParrySounds(profileId = this.parryProfile) {
+    if (profileId === 'default') return Promise.resolve();
+    if (this.parryLoadPromise && this.parryProfile === profileId) {
+      return this.parryLoadPromise;
+    }
+
+    this.parryLoadPromise = (async () => {
+      this.init();
+      const ratings = ['excellent', 'good', 'medium', 'bad', 'miss'];
+      const buffers = {};
+
+      await Promise.all(
+        ratings.map(async (rating) => {
+          try {
+            const res = await fetch(`sounds/keycap/${profileId}/${rating}.wav`);
+            if (!res.ok) return;
+            const arrayBuffer = await res.arrayBuffer();
+            buffers[rating] = await this.ctx.decodeAudioData(arrayBuffer);
+          } catch {
+            /* profile file missing */
+          }
+        })
+      );
+
+      this.parryBuffers = buffers;
+    })();
+
+    return this.parryLoadPromise;
+  }
+
   resume() {
     this.init();
-    if (this.ctx.state === 'suspended') {
-      return this.ctx.resume();
-    }
-    return Promise.resolve();
+    const resumeCtx = this.ctx.state === 'suspended'
+      ? this.ctx.resume()
+      : Promise.resolve();
+    return resumeCtx.then(() => {
+      if (this.parryProfile !== 'default') {
+        return this.loadParrySounds(this.parryProfile);
+      }
+      return undefined;
+    });
   }
 
   stop() {
@@ -146,6 +225,33 @@ class AudioEngine {
 
   playParrySound(rating) {
     if (!this.ctx) return;
+
+    if (this.parryProfile === 'default') {
+      this.playParrySoundDefault(rating);
+      return;
+    }
+
+    const buffer = this.parryBuffers[rating];
+    if (buffer) {
+      const source = this.ctx.createBufferSource();
+      const gain = this.ctx.createGain();
+      const volumes = { excellent: 0.9, good: 0.85, medium: 0.75, bad: 0.7, miss: 0.65 };
+      source.buffer = buffer;
+      gain.gain.value = volumes[rating] || 0.75;
+      source.connect(gain);
+      gain.connect(this.sfxGain);
+      source.start();
+      return;
+    }
+
+    this.playParrySoundDefault(rating);
+  }
+
+  previewParrySound() {
+    this.playParrySound('good');
+  }
+
+  playParrySoundDefault(rating) {
     const time = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();

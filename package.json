@@ -1,0 +1,15 @@
+{
+  "name": "beat-parry-rhythm-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Beat Parry rhythm game with SQLite user progress",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "generate-sounds": "node scripts/generate-parry-sounds.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.9.0",
+    "express": "^4.21.2"
+  }
+}
