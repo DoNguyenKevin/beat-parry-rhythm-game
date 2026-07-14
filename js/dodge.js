@@ -1,6 +1,8 @@
 const DODGE_MAX_LEVEL = 60;
 const DODGE_LEVEL_INTERVAL = 4;
 const DODGE_WARNING_DURATION = 0.5;
+const DODGE_MAX_HEALTH = 100;
+const DODGE_HIT_DAMAGE = 20;
 
 const DODGE_MODE = {
   id: 'dodge-endless',

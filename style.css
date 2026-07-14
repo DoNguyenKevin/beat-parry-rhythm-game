@@ -110,6 +110,31 @@ body {
   color: #cccce0;
 }
 
+.change-account-btn {
+  display: block;
+  margin-top: 0.35rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #aaaacc;
+  font-size: 0.62rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  pointer-events: auto;
+}
+
+.change-account-btn:hover {
+  color: #fff;
+  border-color: rgba(255, 215, 0, 0.35);
+  background: rgba(255, 215, 0, 0.08);
+}
+
+.change-account-btn.hidden {
+  display: none;
+}
+
 .user-modal {
   position: absolute;
   inset: 0;
@@ -175,6 +200,43 @@ body {
 
 .user-form-error.hidden {
   display: none;
+}
+
+.auth-modal-desc {
+  color: #8888aa;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+  line-height: 1.45;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 0.45rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #aaaacc;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.auth-tab.active {
+  border-color: rgba(255, 215, 0, 0.45);
+  background: rgba(255, 215, 0, 0.1);
+  color: #ffd700;
+}
+
+.auth-change-account-btn {
+  margin-top: 0.75rem;
+  width: 100%;
 }
 
 #game-canvas {
@@ -275,6 +337,232 @@ h1 {
   border-color: rgba(255, 215, 0, 0.45);
 }
 
+#tab-shop.active {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.22), rgba(255, 180, 0, 0.15));
+  border-color: rgba(255, 215, 0, 0.55);
+}
+
+.loadout-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: center;
+  margin-bottom: 1rem;
+  min-height: 1.5rem;
+  max-width: min(520px, 92vw);
+}
+
+.loadout-empty {
+  font-size: 0.75rem;
+  color: #666688;
+}
+
+.loadout-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.3rem 0.65rem;
+  border-radius: 20px;
+  background: rgba(255, 215, 0, 0.12);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  color: #ffd700;
+}
+
+.skin-bar {
+  display: flex;
+  justify-content: center;
+  margin: -0.35rem 0 0.85rem;
+}
+
+.skin-bar-chip {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.35rem 0.8rem;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid color-mix(in srgb, var(--skin-color) 55%, transparent);
+  color: var(--skin-color);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--skin-color) 25%, transparent);
+}
+
+#tab-skins.active {
+  background: linear-gradient(135deg, rgba(170, 68, 255, 0.22), rgba(255, 107, 157, 0.18));
+  border-color: rgba(170, 68, 255, 0.45);
+}
+
+.skin-preview {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+}
+
+.shop-intro {
+  color: #8888aa;
+  font-size: 0.85rem;
+  text-align: center;
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+
+.shop-redeem {
+  margin-bottom: 1.25rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 215, 0, 0.2);
+}
+
+.shop-redeem-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #aaaacc;
+  margin-bottom: 0.5rem;
+}
+
+.shop-redeem-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.shop-code-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+.shop-code-input:focus {
+  outline: none;
+  border-color: rgba(255, 215, 0, 0.45);
+}
+
+.shop-redeem-msg {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: #4dff88;
+}
+
+.shop-redeem-msg.error {
+  color: #ff6b6b;
+}
+
+.shop-item-secret {
+  border-color: rgba(255, 120, 80, 0.35);
+  background: rgba(255, 100, 60, 0.06);
+}
+
+.shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.shop-item-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 215, 0, 0.15);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+}
+
+.shop-item-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.shop-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.shop-item-info .name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 0.2rem;
+}
+
+.shop-item-info .meta {
+  font-size: 0.78rem;
+  color: #8888aa;
+  line-height: 1.4;
+}
+
+.shop-modes {
+  margin-top: 0.25rem;
+  color: #6666aa !important;
+}
+
+.shop-item-footer {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+}
+
+.shop-price {
+  color: #ffd700;
+  font-weight: 700;
+}
+
+.shop-owned strong {
+  color: #fff;
+}
+
+.shop-item-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.btn-small {
+  padding: 0.45rem 0.85rem;
+  font-size: 0.78rem;
+  border-radius: 20px;
+}
+
+.ability-hud {
+  position: absolute;
+  top: 8.5rem;
+  left: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: flex-start;
+  max-width: 200px;
+}
+
+.ability-hud.hidden {
+  display: none;
+}
+
+.ability-chip {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.3rem 0.6rem;
+  border-radius: 8px;
+  background: rgba(255, 215, 0, 0.15);
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  color: #ffd700;
+  white-space: nowrap;
+}
+
+.ability-chip-cosmic {
+  background: rgba(123, 44, 191, 0.22);
+  border-color: rgba(224, 64, 251, 0.5);
+  color: #e8c4ff;
+  box-shadow: 0 0 12px rgba(224, 64, 251, 0.35);
+}
+
 #tab-dodge.active {
   background: linear-gradient(135deg, rgba(255, 107, 107, 0.22), rgba(255, 77, 157, 0.18));
   border-color: rgba(255, 107, 107, 0.5);
@@ -289,6 +577,27 @@ h1 {
   background: rgba(255, 80, 80, 0.2);
   border-color: rgba(255, 107, 107, 0.55);
   color: #ff8888;
+}
+
+.boss-badge {
+  background: rgba(199, 125, 255, 0.22);
+  border-color: rgba(224, 64, 251, 0.55);
+  color: #e8c4ff;
+}
+
+#tab-boss.active {
+  background: linear-gradient(135deg, rgba(199, 125, 255, 0.22), rgba(123, 44, 191, 0.18));
+  border-color: rgba(224, 64, 251, 0.5);
+}
+
+.boss-mode-card:hover {
+  border-color: rgba(224, 64, 251, 0.45);
+  box-shadow: 0 0 18px rgba(199, 125, 255, 0.2);
+}
+
+.boss-tag {
+  background: rgba(199, 125, 255, 0.2);
+  color: #e8c4ff;
 }
 
 .sounds-intro {
@@ -506,6 +815,61 @@ h1 {
   display: none;
 }
 
+.dodge-health-hud {
+  position: absolute;
+  right: 1.5rem;
+  top: 7rem;
+  width: 160px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 0.55rem 0.85rem;
+  text-align: right;
+}
+
+.dodge-health-hud.hidden {
+  display: none;
+}
+
+.dodge-health-hud .label {
+  display: block;
+  font-size: 0.7rem;
+  color: #8888aa;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.35rem;
+}
+
+.dodge-health-bar {
+  height: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  overflow: hidden;
+  margin-bottom: 0.3rem;
+}
+
+.dodge-health-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #4dff88, #2dd4bf);
+  border-radius: 5px;
+  transition: width 0.2s ease, background 0.2s ease;
+}
+
+.dodge-health-fill.mid {
+  background: linear-gradient(90deg, #ffc850, #ff9f43);
+}
+
+.dodge-health-fill.low {
+  background: linear-gradient(90deg, #ff6b6b, #ff4444);
+}
+
+.dodge-health-text {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #fff;
+}
+
 .training-summary-line {
   color: #4dff88;
   font-size: 1.1rem;
@@ -629,6 +993,66 @@ h1 {
 .difficulty.medium { background: #3d3a1a; color: #ffee00; border: 1px solid #ffee00; }
 .difficulty.hard { background: #3d1a1a; color: #ff2222; border: 1px solid #ff2222; }
 .difficulty.expert { background: #2a1a3d; color: #cc44ff; border: 1px solid #cc44ff; }
+.difficulty.nightmare { background: #3d0a14; color: #ff0044; border: 1px solid #ff0044; }
+
+.play-subtabs {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.play-subtab {
+  padding: 0.4rem 1rem;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #aaaacc;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.play-subtab:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.play-subtab.active {
+  border-color: rgba(255, 0, 68, 0.6);
+  background: rgba(255, 0, 68, 0.12);
+  color: #ff6688;
+}
+
+.play-intro {
+  color: #aa8899;
+  font-size: 0.82rem;
+  text-align: center;
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+
+.play-intro strong {
+  color: #ff4466;
+}
+
+.nightmare-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.song-card.nightmare-card {
+  border-color: rgba(255, 0, 68, 0.25);
+  background: rgba(255, 0, 40, 0.06);
+}
+
+.nightmare-badge {
+  background: rgba(255, 0, 68, 0.15);
+  border-color: rgba(255, 0, 68, 0.45);
+  color: #ff4466;
+}
 
 .layers-tag {
   background: rgba(255, 255, 255, 0.08);

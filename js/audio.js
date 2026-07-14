@@ -150,6 +150,12 @@ class AudioEngine {
     return this.ctx.currentTime - this.startTime;
   }
 
+  seekTo(offset) {
+    if (!this.song || !this.isPlaying) return;
+    const clamped = Math.max(0, Math.min(offset, this.song.duration - 0.5));
+    this.playSong(this.song, clamped);
+  }
+
   scheduleKick(time, freq) {
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();

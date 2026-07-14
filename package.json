@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "stop": "powershell -ExecutionPolicy Bypass -File scripts/stop-server.ps1",
+    "restart": "npm run stop && npm start",
     "generate-sounds": "node scripts/generate-parry-sounds.js"
   },
   "dependencies": {

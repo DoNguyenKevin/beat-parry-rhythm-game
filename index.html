@@ -23,18 +23,25 @@
       <div class="rud-info">
         <span class="rud-label">RUD</span>
         <span id="rud-balance">0</span>
-        <button type="button" id="user-name-btn" class="user-name-btn" title="Change player">Player</button>
+        <button type="button" id="user-name-btn" class="user-name-btn" title="Account">Player</button>
+        <button type="button" id="change-account-btn" class="change-account-btn hidden">Change account</button>
       </div>
     </div>
 
     <div id="user-modal" class="user-modal hidden">
       <div class="user-modal-card">
-        <h2>Choose your name</h2>
-        <p>RUD balance is saved per player in the SQLite database.</p>
+        <h2 id="auth-modal-title">Account</h2>
+        <p class="auth-modal-desc">Create an account or log in. Your RUD, scores, and shop progress are saved in SQLite.</p>
+        <div class="auth-tabs">
+          <button type="button" id="auth-tab-login" class="auth-tab active">Log in</button>
+          <button type="button" id="auth-tab-register" class="auth-tab">Register</button>
+        </div>
         <form id="user-form">
           <input type="text" id="username-input" maxlength="20" placeholder="Username" autocomplete="username" required />
-          <button type="submit" class="btn">Play</button>
+          <input type="password" id="password-input" maxlength="64" placeholder="Password" autocomplete="current-password" required />
+          <button type="submit" id="auth-submit-btn" class="btn">Log in</button>
         </form>
+        <button type="button" id="auth-change-account-btn" class="btn btn-secondary auth-change-account-btn hidden">Change account</button>
         <p id="user-form-error" class="user-form-error hidden"></p>
       </div>
     </div>
@@ -49,11 +56,23 @@
         <button type="button" id="tab-play" class="menu-tab active">Play</button>
         <button type="button" id="tab-training" class="menu-tab">Training</button>
         <button type="button" id="tab-dodge" class="menu-tab">Dodge</button>
+        <button type="button" id="tab-boss" class="menu-tab">Boss</button>
+        <button type="button" id="tab-shop" class="menu-tab">Shop</button>
+        <button type="button" id="tab-skins" class="menu-tab">Skins</button>
         <button type="button" id="tab-sounds" class="menu-tab">Sounds</button>
       </div>
 
+      <div id="loadout-bar" class="loadout-bar"></div>
+      <div id="skin-bar" class="skin-bar"></div>
+
       <div id="play-panel" class="menu-panel">
+        <div class="play-subtabs">
+          <button type="button" id="play-tab-standard" class="play-subtab active">Songs</button>
+          <button type="button" id="play-tab-nightmare" class="play-subtab">Nightmare</button>
+        </div>
+        <p id="nightmare-intro" class="play-intro hidden">Extreme difficulty — razor-tight timing, dense patterns, brutal speed. <strong>S rank = 10,000 RUD</strong> per clear.</p>
         <div id="song-list"></div>
+        <div id="nightmare-list" class="nightmare-list hidden"></div>
       </div>
 
       <div id="training-panel" class="menu-panel hidden">
@@ -62,8 +81,31 @@
       </div>
 
       <div id="dodge-panel" class="menu-panel hidden">
-        <p class="training-intro">Move your cursor to dodge bullets. Earn RUD when you quit (ESC). Higher level and more dodges = more RUD. 60 levels — ramps every 4 seconds.</p>
+        <p class="training-intro">Move your cursor to dodge bullets. You have 5 hits before defeat. Earn RUD when you quit (ESC) or survive. Higher level and more dodges = more RUD. 60 levels — ramps every 4 seconds.</p>
         <div id="dodge-list"></div>
+      </div>
+
+      <div id="boss-panel" class="menu-panel hidden">
+        <p class="training-intro">Boss Fight — move your cursor, your skin grants an auto-aim gun (Void God = Cosmic Pistol). Each round has a unique signature skill; bosses spawn minions to fight. <kbd>SPACE</kbd> stuns · <kbd>V</kbd> dodges.</p>
+        <div id="boss-list"></div>
+      </div>
+
+      <div id="shop-panel" class="menu-panel hidden">
+        <p class="shop-intro">Spend RUD on one-run abilities. Equip up to 2 shop abilities plus any secret skills (Overdrive & Void Dash can both be equipped).</p>
+        <div class="shop-redeem">
+          <label for="shop-code-input" class="shop-redeem-label">Have a secret code?</label>
+          <div class="shop-redeem-row">
+            <input type="text" id="shop-code-input" class="shop-code-input" placeholder="Enter code" autocomplete="off" spellcheck="false" />
+            <button type="button" id="shop-redeem-btn" class="btn btn-small">Redeem</button>
+          </div>
+          <p id="shop-redeem-msg" class="shop-redeem-msg hidden"></p>
+        </div>
+        <div id="shop-list" class="shop-list"></div>
+      </div>
+
+      <div id="skins-panel" class="menu-panel hidden">
+        <p class="shop-intro">Buy permanent skins with RUD. Better skins cost more and grant passive bonuses every run. Equip one skin — it changes your ball look and stats.</p>
+        <div id="skins-list" class="shop-list skins-list"></div>
       </div>
 
       <div id="sounds-panel" class="menu-panel hidden">
@@ -80,8 +122,18 @@
 
     <div id="hud" class="hidden">
       <div id="training-badge" class="training-badge hidden">TRAINING</div>
+      <div id="nightmare-badge" class="training-badge nightmare-badge hidden">NIGHTMARE</div>
       <div id="dodge-badge" class="training-badge dodge-badge hidden">DODGE</div>
+      <div id="boss-badge" class="training-badge boss-badge hidden">BOSS</div>
       <div id="training-level-hud" class="training-level-hud hidden">Level 1</div>
+      <div id="ability-hud" class="ability-hud hidden"></div>
+      <div id="dodge-health-hud" class="dodge-health-hud hidden">
+        <span class="label">Health</span>
+        <div class="dodge-health-bar">
+          <div id="dodge-health-fill" class="dodge-health-fill"></div>
+        </div>
+        <span id="dodge-health-text" class="dodge-health-text">100</span>
+      </div>
       <div class="hud-score">
         <span class="label">Score</span>
         <span id="score">0</span>
@@ -122,12 +174,15 @@
     <div id="flash-overlay"></div>
   </div>
 
-  <script src="js/songs.js?v=5"></script>
-  <script src="js/currency.js?v=5"></script>
-  <script src="js/training.js?v=5"></script>
-  <script src="js/dodge.js?v=5"></script>
-  <script src="js/audio.js?v=5"></script>
-  <script src="js/game.js?v=5"></script>
-  <script src="js/main.js?v=5"></script>
+  <script src="js/songs.js?v=8"></script>
+  <script src="js/currency.js?v=14"></script>
+  <script src="js/shop.js?v=14"></script>
+  <script src="js/skins.js?v=5"></script>
+  <script src="js/training.js?v=6"></script>
+  <script src="js/dodge.js?v=7"></script>
+  <script src="js/boss.js?v=2"></script>
+  <script src="js/audio.js?v=6"></script>
+  <script src="js/game.js?v=22"></script>
+  <script src="js/main.js?v=22"></script>
 </body>
 </html>

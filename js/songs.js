@@ -29,6 +29,13 @@ const DIFFICULTY_META = {
     densityBase: 0.55,
     densityMax: 0.98,
   },
+  nightmare: {
+    label: 'Nightmare',
+    ballColor: '#ff0044',
+    layers: 2,
+    densityBase: 0.72,
+    densityMax: 0.99,
+  },
 };
 
 const SONGS = [
@@ -122,6 +129,50 @@ const SONGS = [
   },
 ];
 
+const NIGHTMARE_S_RUD = 10000;
+
+const NIGHTMARE_SONGS = [
+  {
+    id: 'nightmare-oblivion',
+    name: 'Oblivion',
+    bpm: 198,
+    duration: 80,
+    difficulty: 'nightmare',
+    color: '#ff1144',
+    bassFreq: 85,
+    melodyScale: [0, 1, 2, 4, 6, 8, 10, 11],
+    baseSpeed: 520,
+    maxSpeed: 820,
+    speedMult: 1.2,
+  },
+  {
+    id: 'nightmare-cataclysm',
+    name: 'Cataclysm',
+    bpm: 210,
+    duration: 70,
+    difficulty: 'nightmare',
+    color: '#ff3300',
+    bassFreq: 90,
+    melodyScale: [0, 1, 3, 4, 7, 8, 10, 11],
+    baseSpeed: 540,
+    maxSpeed: 860,
+    speedMult: 1.25,
+  },
+  {
+    id: 'nightmare-annihilation',
+    name: 'Annihilation',
+    bpm: 220,
+    duration: 90,
+    difficulty: 'nightmare',
+    color: '#cc0022',
+    bassFreq: 95,
+    melodyScale: [0, 1, 2, 3, 5, 7, 9, 10, 11],
+    baseSpeed: 560,
+    maxSpeed: 900,
+    speedMult: 1.3,
+  },
+];
+
 const KEY_MAP = {
   f: { side: 'left', lane: 0 },
   g: { side: 'left', lane: 1 },
@@ -175,6 +226,12 @@ const EXPERT_TIMING_WINDOWS = {
   medium: 45,
 };
 
+const NIGHTMARE_TIMING_WINDOWS = {
+  excellent: 8,
+  good: 18,
+  medium: 32,
+};
+
 const TRAINING_TIMING_WINDOWS = {
   excellent: 28,
   good: 50,
@@ -183,6 +240,7 @@ const TRAINING_TIMING_WINDOWS = {
 
 function getTimingWindows(song) {
   if (song?.isTraining) return TRAINING_TIMING_WINDOWS;
+  if (song?.difficulty === 'nightmare') return NIGHTMARE_TIMING_WINDOWS;
   return song?.difficulty === 'expert' ? EXPERT_TIMING_WINDOWS : TIMING_WINDOWS;
 }
 
@@ -203,6 +261,7 @@ function generateBeatMap(song) {
   const lanes = layers === 1 ? [0] : [0, 1];
   const meta = DIFFICULTY_META[song.difficulty] || DIFFICULTY_META.medium;
   const isExpert = song.difficulty === 'expert';
+  const isNightmare = song.difficulty === 'nightmare';
   const rand = seededRandom(song.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0));
 
   for (let beat = 4; beat < totalBeats - 2; beat++) {
@@ -220,9 +279,9 @@ function generateBeatMap(song) {
     const side = sides[Math.floor(rand() * sides.length)];
     const lane = lanes[Math.floor(rand() * lanes.length)];
 
-    const doubleLaneChance = isExpert ? 0.45 : 0.3;
-    const crossSideChance = isExpert ? 0.35 : 0.25;
-    const offBeatChance = isExpert ? 0.25 : 0.15;
+    const doubleLaneChance = isNightmare ? 0.62 : isExpert ? 0.45 : 0.3;
+    const crossSideChance = isNightmare ? 0.52 : isExpert ? 0.35 : 0.25;
+    const offBeatChance = isNightmare ? 0.42 : isExpert ? 0.25 : 0.15;
 
     if (layers === 2 && progress > 0.5 && rand() < doubleLaneChance) {
       notes.push({ time, side, lane: 0 });
@@ -255,6 +314,14 @@ function generateBeatMap(song) {
         lane: lanes[Math.floor(rand() * lanes.length)],
       });
     }
+
+    if (isNightmare && progress > 0.55 && rand() < 0.28) {
+      notes.push({
+        time: time + beatInterval * (rand() < 0.5 ? 0.33 : 0.66),
+        side: sides[Math.floor(rand() * 2)],
+        lane: lanes[Math.floor(rand() * lanes.length)],
+      });
+    }
   }
 
   notes.sort((a, b) => a.time - b.time);
@@ -271,6 +338,10 @@ function getGrade(accuracy) {
 }
 
 function getSpeedForProgress(song, progress) {
+  if (song.difficulty === 'nightmare') {
+    const eased = progress * progress * progress * progress;
+    return song.baseSpeed + (song.maxSpeed - song.baseSpeed) * eased;
+  }
   const eased = song.difficulty === 'expert' ? progress * progress * progress : progress * progress;
   return song.baseSpeed + (song.maxSpeed - song.baseSpeed) * eased;
 }
