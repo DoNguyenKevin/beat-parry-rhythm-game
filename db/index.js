@@ -4,6 +4,7 @@ const scores = require('./scores');
 const inventory = require('./inventory');
 const skins = require('./skins');
 const codes = require('./codes');
+const admin = require('./admin');
 const pool = require('./pool');
 const migrate = require('./migrate');
 
@@ -14,6 +15,7 @@ module.exports = {
   ...inventory,
   ...skins,
   ...codes,
+  ...admin,
   ...pool,
   ...migrate,
 };

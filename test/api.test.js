@@ -35,7 +35,7 @@ before(async () => {
 
 afterEach(async () => {
   await adminPool.query(`
-    TRUNCATE user_sessions, best_scores, user_inventory, user_redeemed_codes, user_owned_skins, users
+    TRUNCATE user_sessions, best_scores, user_inventory, user_redeemed_codes, user_owned_skins, admin_config, users
     RESTART IDENTITY CASCADE
   `);
   await closePool();

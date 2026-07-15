@@ -247,17 +247,8 @@ const Shop = {
     });
   },
 
-  async buy(abilityId) {
-    if (!RUDWallet.userId) throw new Error('Log in first.');
-    const item = SHOP_ITEMS[abilityId];
-    if (!item || item.secret) throw new Error('This ability cannot be purchased.');
-    const data = await RUDWallet.api(`/api/users/${RUDWallet.userId}/buy`, {
-      method: 'POST',
-      body: JSON.stringify({ abilityId }),
-    });
-    RUDWallet.balance = data.balance;
-    this.setInventory(data.inventory);
-    return data;
+  async buy() {
+    throw new Error('Purchases are disabled. Earn skills from the Spin tab.');
   },
 
   async redeemCode(code) {

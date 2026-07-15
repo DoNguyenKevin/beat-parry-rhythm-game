@@ -50,7 +50,8 @@ let lastBossSong = null;
 let lastNightmareSong = null;
 
 function updateRudDisplay(animate) {
-  rudBalanceEl.textContent = RUDWallet.balance.toLocaleString();
+  rudBalanceEl.textContent = formatRudShort(RUDWallet.balance);
+  rudBalanceEl.title = `${Number(RUDWallet.balance).toLocaleString()} RUD`;
   userNameBtn.textContent = RUDWallet.username || 'Player';
   const loggedIn = RUDWallet.ready && RUDWallet.userId;
   changeAccountBtn.classList.toggle('hidden', !loggedIn);
@@ -115,6 +116,10 @@ async function handleUserSubmit(e) {
     hideUserModal();
     updateRudDisplay(false);
     refreshShopUI();
+    if (typeof AdminPanel !== 'undefined') {
+      AdminPanel.setVisible(RUDWallet.isAdmin);
+      if (RUDWallet.isAdmin) AdminPanel.refresh();
+    }
   } catch (err) {
     userFormError.textContent = err.message;
     userFormError.classList.remove('hidden');
@@ -129,7 +134,17 @@ async function handleChangeAccount() {
   showUserModal('Sign in with a different account.');
 }
 
+function blockIfMaintenance() {
+  if (typeof GameConfig !== 'undefined' && GameConfig.maintenanceMode && !RUDWallet.isAdmin) {
+    alert('Beat Parry is in maintenance mode. Please check back soon.');
+    return true;
+  }
+  return false;
+}
+
 async function initApp() {
+  if (typeof GameConfig !== 'undefined') await GameConfig.fetch();
+  if (typeof AdminPanel !== 'undefined') AdminPanel.showAnnouncement();
   try {
     const { needsAuth } = await RUDWallet.init();
     if (needsAuth && typeof Shop !== 'undefined') {
@@ -137,6 +152,10 @@ async function initApp() {
     }
     updateRudDisplay(false);
     refreshShopUI();
+    if (typeof AdminPanel !== 'undefined') {
+      AdminPanel.setVisible(RUDWallet.isAdmin);
+      if (RUDWallet.isAdmin) AdminPanel.refresh();
+    }
     if (needsAuth) {
       setAuthMode('login');
       showUserModal();
@@ -161,7 +180,7 @@ function modeLabel(mode) {
 function renderLoadoutBar() {
   const equipped = Shop.equipped.filter((id) => Shop.getQuantity(id) > 0);
   if (!equipped.length) {
-    loadoutBar.innerHTML = '<span class="loadout-empty">No abilities equipped — visit Shop</span>';
+    loadoutBar.innerHTML = '<span class="loadout-empty">No abilities equipped — visit Inventory</span>';
     return;
   }
   loadoutBar.innerHTML = equipped.map((id) => {
@@ -175,9 +194,17 @@ function buildShopList() {
   const shopList = document.getElementById('shop-list');
   shopList.innerHTML = '';
 
-  for (const item of Shop.getItems()) {
-    if (item.secret && !Shop.isSecretUnlocked(item.id)) continue;
+  const ownedItems = Shop.getItems().filter((item) => {
+    if (item.secret) return Shop.isSecretUnlocked(item.id);
+    return Shop.getQuantity(item.id) > 0;
+  });
 
+  if (!ownedItems.length) {
+    shopList.innerHTML = '<p class="inventory-empty">No skills yet. Win abilities from the <strong>Spin</strong> tab, then equip them here.</p>';
+    return;
+  }
+
+  for (const item of ownedItems) {
     const card = document.createElement('div');
     card.className = 'shop-item-card';
     if (item.secret) card.classList.add('shop-item-secret');
@@ -186,7 +213,7 @@ function buildShopList() {
     const equipped = Shop.isEquipped(item.id);
     const canEquip = Shop.canEquip(item.id);
     const modes = item.modes.map(modeLabel).join(', ');
-    const priceLabel = item.secret ? 'Secret unlock' : `${item.price.toLocaleString()} RUD`;
+    const qtyLabel = item.secret ? 'Permanent' : `×${qty}`;
 
     card.innerHTML = `
       <div class="shop-item-icon">${item.icon}</div>
@@ -195,18 +222,14 @@ function buildShopList() {
         <div class="meta">${item.description}</div>
         <div class="meta shop-modes">For: ${modes}</div>
         <div class="shop-item-footer">
-          <span class="shop-price">${priceLabel}</span>
-          <span class="shop-owned">Owned: <strong>${qty}</strong></span>
+          <span class="shop-owned">Owned: <strong>${qtyLabel}</strong></span>
         </div>
       </div>
       <div class="shop-item-actions">
-        ${item.secret ? '' : '<button type="button" class="btn btn-small shop-buy-btn">Buy</button>'}
         <button type="button" class="btn btn-secondary btn-small shop-equip-btn" ${canEquip ? '' : 'disabled'}>${equipped ? 'Equipped' : 'Equip'}</button>
       </div>
     `;
 
-    const buyBtn = card.querySelector('.shop-buy-btn');
-    if (buyBtn) buyBtn.addEventListener('click', () => buyAbility(item.id));
     card.querySelector('.shop-equip-btn').addEventListener('click', () => toggleEquipAbility(item.id));
     shopList.appendChild(card);
   }
@@ -215,7 +238,7 @@ function buildShopList() {
 function renderSkinBar() {
   if (!skinBar) return;
   const skin = Skins.getEquippedData();
-  const passiveText = formatSkinPassives(skin.passives);
+  const passiveText = formatSkinPassives(skin.passives, { effect: skin.effect });
   skinBar.innerHTML = `<span class="skin-bar-chip" style="--skin-color: ${skin.colors?.primary || '#ff6b9d'}">${skin.icon} ${skin.name} · ${passiveText}</span>`;
 }
 
@@ -224,40 +247,39 @@ function buildSkinsList() {
   if (!skinsList) return;
   skinsList.innerHTML = '';
 
-  for (const skin of Skins.getList()) {
-    if (skin.secret && !Skins.owns(skin.id)) continue;
+  const ownedSkins = Skins.getList().filter((skin) => Skins.owns(skin.id));
 
-    const owned = Skins.owns(skin.id);
+  if (!ownedSkins.length) {
+    skinsList.innerHTML = '<p class="inventory-empty">No skins yet. Win skins from the <strong>Spin</strong> tab.</p>';
+    return;
+  }
+
+  for (const skin of ownedSkins) {
     const equipped = Skins.isEquipped(skin.id);
-    const priceLabel = skin.secret ? 'Secret unlock' : skin.price === 0 ? 'Free' : `${skin.price.toLocaleString()} RUD`;
-    const passiveText = formatSkinPassives(skin.passives);
+    const passiveText = formatSkinPassives(skin.passives, { effect: skin.effect });
 
     const card = document.createElement('div');
     card.className = 'shop-item-card skin-item-card';
     if (skin.secret) card.classList.add('shop-item-secret');
+    if (skin.spinOnly) card.classList.add('shop-item-spin-only');
     card.dataset.skin = skin.id;
     const previewStyle = skin.effect === 'cosmic'
       ? 'background: radial-gradient(circle at 30% 28%, #e8f4ff, #7b2cbf 35%, #3a0ca3 58%, #10002b 78%, #030109); box-shadow: 0 0 22px rgba(224, 64, 251, 0.55);'
-      : `background: radial-gradient(circle at 35% 35%, ${skin.colors?.accent || '#fff'}, ${skin.colors?.primary || '#ff6b9d'} 55%, ${skin.colors?.glow || '#ff6b9d'})`;
+      : skin.effect === 'fortune'
+        ? 'background: radial-gradient(circle at 32% 26%, #fff8dc, #ffd700 32%, #ff9900 58%, #b8860b 78%, #3d2a00); box-shadow: 0 0 22px rgba(255, 215, 0, 0.55), inset 0 0 12px rgba(255, 248, 220, 0.35);'
+        : `background: radial-gradient(circle at 35% 35%, ${skin.colors?.accent || '#fff'}, ${skin.colors?.primary || '#ff6b9d'} 55%, ${skin.colors?.glow || '#ff6b9d'})`;
     card.innerHTML = `
       <div class="shop-item-icon skin-preview" style="${previewStyle}">${skin.icon}</div>
       <div class="shop-item-info">
         <div class="name">${skin.name}</div>
         <div class="meta">${skin.description}</div>
         <div class="meta shop-modes">Passive: ${passiveText}</div>
-        <div class="shop-item-footer">
-          <span class="shop-price">${priceLabel}</span>
-          <span class="shop-owned">${owned ? 'Owned' : 'Not owned'}</span>
-        </div>
       </div>
       <div class="shop-item-actions">
-        ${owned || skin.secret ? '' : '<button type="button" class="btn btn-small skin-buy-btn">Buy</button>'}
-        <button type="button" class="btn btn-secondary btn-small skin-equip-btn" ${owned ? '' : 'disabled'}>${equipped ? 'Equipped' : 'Equip'}</button>
+        <button type="button" class="btn btn-secondary btn-small skin-equip-btn">${equipped ? 'Equipped' : 'Equip'}</button>
       </div>
     `;
 
-    const buyBtn = card.querySelector('.skin-buy-btn');
-    if (buyBtn) buyBtn.addEventListener('click', () => buySkin(skin.id));
     card.querySelector('.skin-equip-btn').addEventListener('click', () => equipSkin(skin.id));
     skinsList.appendChild(card);
   }
@@ -266,16 +288,6 @@ function buildSkinsList() {
 function refreshSkinsUI() {
   buildSkinsList();
   renderSkinBar();
-}
-
-async function buySkin(skinId) {
-  try {
-    await Skins.buy(skinId);
-    updateRudDisplay(false);
-    refreshSkinsUI();
-  } catch (err) {
-    alert(err.message);
-  }
 }
 
 async function equipSkin(skinId) {
@@ -295,16 +307,7 @@ function refreshShopUI() {
   buildShopList();
   renderLoadoutBar();
   refreshSkinsUI();
-}
-
-async function buyAbility(abilityId) {
-  try {
-    await Shop.buy(abilityId);
-    updateRudDisplay(false);
-    refreshShopUI();
-  } catch (err) {
-    alert(err.message);
-  }
+  if (typeof PrizeWheel !== 'undefined') PrizeWheel.refreshUI();
 }
 
 function toggleEquipAbility(abilityId) {
@@ -317,7 +320,7 @@ function toggleEquipAbility(abilityId) {
       if (item?.secret) {
         alert('Unlock this secret ability first.');
       } else {
-        alert(`Equip up to ${MAX_EQUIPPED} shop abilities. Secret skills (Overdrive, Void Dash) are extra.`);
+        alert(`Equip up to ${MAX_EQUIPPED} skills at a time. Secret skills (Overdrive, Void Dash) are extra.`);
       }
       return;
     }
@@ -355,8 +358,15 @@ function showAbilityHud(abilities) {
     const hint = abilityKeyHint(id);
     const cosmic = Skins.getEquipped() === 'skin-void-god'
       && (id === 'op-overdrive' || id === 'op-void-dash');
-    const cls = cosmic ? 'ability-chip ability-chip-cosmic' : 'ability-chip';
-    return `<span class="${cls}">${item?.icon || '✦'} ${item?.name || id}${hint}${cosmic ? ' ✦' : ''}</span>`;
+    const fortune = Skins.getEquipped() === 'skin-fortune-crown'
+      && (id === 'op-overdrive' || id === 'op-void-dash');
+    const cls = cosmic
+      ? 'ability-chip ability-chip-cosmic'
+      : fortune
+        ? 'ability-chip ability-chip-fortune'
+        : 'ability-chip';
+    const suffix = cosmic ? ' ✦' : fortune ? ' 👑' : '';
+    return `<span class="${cls}">${item?.icon || '✦'} ${item?.name || id}${hint}${suffix}</span>`;
   }).join('');
   abilityHud.classList.remove('hidden');
 }
@@ -621,6 +631,10 @@ function setupMenuTabs() {
       tab: document.getElementById('tab-shop'),
       panel: document.getElementById('shop-panel'),
     },
+    wheel: {
+      tab: document.getElementById('tab-wheel'),
+      panel: document.getElementById('wheel-panel'),
+    },
     skins: {
       tab: document.getElementById('tab-skins'),
       panel: document.getElementById('skins-panel'),
@@ -628,6 +642,10 @@ function setupMenuTabs() {
     sounds: {
       tab: document.getElementById('tab-sounds'),
       panel: document.getElementById('sounds-panel'),
+    },
+    admin: {
+      tab: document.getElementById('tab-admin'),
+      panel: document.getElementById('admin-panel'),
     },
   };
 
@@ -669,6 +687,14 @@ function setupMenuTabs() {
     refreshShopUI();
   });
 
+  tabs.wheel.tab.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showPanel('wheel');
+    if (typeof PrizeWheel !== 'undefined') {
+      PrizeWheel.refreshUI();
+    }
+  });
+
   tabs.skins.tab.addEventListener('click', (e) => {
     e.stopPropagation();
     showPanel('skins');
@@ -680,6 +706,14 @@ function setupMenuTabs() {
     showPanel('sounds');
     updateSoundMenuSelection();
   });
+
+  if (tabs.admin.tab) {
+    tabs.admin.tab.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showPanel('admin');
+      if (typeof AdminPanel !== 'undefined') AdminPanel.refresh();
+    });
+  }
 }
 
 function buildSoundList() {
@@ -752,6 +786,7 @@ function bindAbilityHud(game) {
 }
 
 async function startSong(song, isTraining, options = {}) {
+  if (blockIfMaintenance()) return;
   await audioEngine.resume();
 
   const isNightmare = !!options.nightmare && !isTraining;
@@ -825,6 +860,7 @@ async function startSong(song, isTraining, options = {}) {
 }
 
 async function startBossMode(song) {
+  if (blockIfMaintenance()) return;
   await audioEngine.resume();
   const abilities = await prepareRunAbilities('boss');
   lastBossSong = song;
@@ -884,6 +920,7 @@ function finishBoss() {
 }
 
 async function startDodgeMode(song) {
+  if (blockIfMaintenance()) return;
   await audioEngine.resume();
   const abilities = await prepareRunAbilities('dodge');
   lastDodgeSong = song;
@@ -1154,6 +1191,8 @@ buildSkinsList();
 buildSoundList();
 setupMenuTabs();
 setupPlaySubtabs();
+if (typeof PrizeWheel !== 'undefined') PrizeWheel.init();
+if (typeof AdminPanel !== 'undefined') AdminPanel.init();
 renderLoadoutBar();
 document.getElementById('sound-reset-btn').addEventListener('click', resetSoundProfile);
 document.getElementById('shop-redeem-btn')?.addEventListener('click', redeemShopCode);

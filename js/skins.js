@@ -51,6 +51,33 @@ const SKINS = {
     colors: { primary: '#ff5533', glow: '#ff8800', accent: '#ffcc99' },
     passives: { scoreMult: 1.2, comboCapBonus: 10 },
   },
+  'skin-fortune-crown': {
+    id: 'skin-fortune-crown',
+    name: 'Fortune Crown',
+    description: 'Spin exclusive — +25% score, +20% RUD, +15% timing, +15 combo cap, +15 dodge HP, golden trail. Boss weapon: Golden Reaper. (Only Void God is stronger.)',
+    price: 0,
+    tier: 5,
+    spinOnly: true,
+    effect: 'fortune',
+    icon: '👑',
+    colors: {
+      primary: '#ffd700',
+      glow: '#ff9900',
+      accent: '#fff8dc',
+      ring: '#daa520',
+      crown: '#ffec8b',
+      shimmer: '#fffacd',
+      coin: '#f0c040',
+    },
+    passives: {
+      scoreMult: 1.25,
+      rudMult: 1.2,
+      windowMult: 1.15,
+      comboCapBonus: 15,
+      dodgeHealthBonus: 15,
+      trail: true,
+    },
+  },
   'skin-void-god': {
     id: 'skin-void-god',
     name: 'Void God',
@@ -89,14 +116,14 @@ function getSkinList() {
   return Object.values(SKINS).sort((a, b) => a.tier - b.tier || a.price - b.price);
 }
 
-function formatSkinPassives(passives = {}) {
+function formatSkinPassives(passives = {}, options = {}) {
   const parts = [];
   if (passives.scoreMult) parts.push(`+${Math.round((passives.scoreMult - 1) * 100)}% score`);
   if (passives.windowMult) parts.push(`+${Math.round((passives.windowMult - 1) * 100)}% timing`);
   if (passives.rudMult) parts.push(`+${Math.round((passives.rudMult - 1) * 100)}% RUD`);
   if (passives.comboCapBonus) parts.push(`+${passives.comboCapBonus} combo cap`);
   if (passives.dodgeHealthBonus) parts.push(`+${passives.dodgeHealthBonus} dodge HP`);
-  if (passives.trail) parts.push('void trail');
+  if (passives.trail) parts.push(options.effect === 'fortune' ? 'golden trail' : 'void trail');
   return parts.length ? parts.join(' · ') : 'No bonus';
 }
 
@@ -155,19 +182,8 @@ const Skins = {
     return getSkin(this.getEquipped());
   },
 
-  async buy(skinId) {
-    if (!RUDWallet.userId) throw new Error('Log in first.');
-    const skin = SKINS[skinId];
-    if (!skin || skin.secret) throw new Error('This skin cannot be purchased.');
-    if (this.owns(skinId)) throw new Error('You already own this skin.');
-
-    const data = await RUDWallet.api(`/api/users/${RUDWallet.userId}/buy-skin`, {
-      method: 'POST',
-      body: JSON.stringify({ skinId }),
-    });
-    RUDWallet.balance = data.balance;
-    this.setOwned(data.ownedSkins || [...this.owned, skinId]);
-    return data;
+  async buy() {
+    throw new Error('Purchases are disabled. Earn skins from the Spin tab.');
   },
 
   async equip(skinId) {

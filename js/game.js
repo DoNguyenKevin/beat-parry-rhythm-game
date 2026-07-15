@@ -58,9 +58,10 @@ class BeatParryGame {
     this.skinTrail = [];
     this._skinTrailTick = 0;
     this.cosmicOrbitals = [];
+    this.fortuneOrbitals = [];
     this.overdriveWave = null;
     this.overdriveWave2 = null;
-    this.overdriveConstellation = null;
+    this.overdriveFortuneFx = null;
     this.voidDashEffect = null;
     this.voidDashUntilMs = 0;
 
@@ -147,7 +148,7 @@ class BeatParryGame {
     };
     this.overdriveWave = null;
     this.overdriveWave2 = null;
-    this.overdriveConstellation = null;
+    this.overdriveFortuneFx = null;
     this.voidDashEffect = null;
     this.voidDashUntilMs = 0;
     this.bossRound = 1;
@@ -224,6 +225,7 @@ class BeatParryGame {
     this.activeSkin = getSkin(options.skinId || DEFAULT_SKIN_ID);
     this.skinPassives = this.activeSkin.passives || {};
     this.initCosmicOrbitals();
+    this.initFortuneOrbitals();
     if (isDodge) {
       this.dodgeMaxHealth = DODGE_MAX_HEALTH + (this.skinPassives.dodgeHealthBonus || 0);
       this.dodgeHealth = this.dodgeMaxHealth;
@@ -303,6 +305,9 @@ class BeatParryGame {
     const startLevel = this.song.startLevel || (this.dodgeMode ? 1 : 3);
     if (this.playMode === 'boss') return this.bossRound;
     if (this.playMode === 'dodge') return getDodgeLevel(this.getDodgeElapsed(), startLevel);
+    if (typeof GameConfig !== 'undefined') {
+      return GameConfig.getTrainingLevel(audioEngine.getCurrentTime(), startLevel);
+    }
     return getTrainingLevel(audioEngine.getCurrentTime(), startLevel);
   }
 
@@ -345,12 +350,17 @@ class BeatParryGame {
 
   spawnEndlessNotes(currentTime) {
     const startLevel = this.song.startLevel || 3;
-    this.trainingLevel = getTrainingLevel(currentTime, startLevel);
+    this.trainingLevel = typeof GameConfig !== 'undefined'
+      ? GameConfig.getTrainingLevel(currentTime, startLevel)
+      : getTrainingLevel(currentTime, startLevel);
     const level = this.trainingLevel;
     const layers = getSongLayers(this.song);
-    const speed = getEndlessSpeed(this.song, level);
+    const speedMult = typeof GameConfig !== 'undefined'
+      ? GameConfig.getSpeedMult('training', { training: true, endless: true })
+      : 1;
+    const speed = getEndlessSpeed(this.song, level) * speedMult;
     const spawnLead = (this.lineLength / 2) / speed;
-    const interval = getEndlessSpawnInterval(level, this.song.bpm);
+    const interval = getEndlessSpawnInterval(level, this.song.bpm) / speedMult;
 
     while (this.nextSpawnTime <= currentTime + spawnLead) {
       const pattern = pickEndlessNotes(level, layers, this.spawnBeatCounter);
@@ -377,12 +387,17 @@ class BeatParryGame {
     const nowMs = performance.now();
     const elapsed = this.getDodgeElapsed();
     const startLevel = this.song.startLevel || 1;
-    this.trainingLevel = getDodgeLevel(elapsed, startLevel);
+    this.trainingLevel = typeof GameConfig !== 'undefined'
+      ? GameConfig.getDodgeLevel(elapsed, startLevel)
+      : getDodgeLevel(elapsed, startLevel);
     const level = this.trainingLevel;
-    const interval = getDodgeSpawnInterval(level);
+    const speedMult = typeof GameConfig !== 'undefined'
+      ? GameConfig.getSpeedMult('dodge')
+      : 1;
+    const interval = getDodgeSpawnInterval(level) / speedMult;
     const warningMs = getDodgeWarningDuration(level) * 1000
       * (this.hasAbility('long-warning') ? 1.4 : 1);
-    const speed = getDodgeBulletSpeed(level);
+    const speed = getDodgeBulletSpeed(level) * speedMult;
     const burst = getDodgeBurstCount(level);
 
     while (this.dodgeNextSpawnMs <= nowMs + warningMs + 50) {
@@ -460,7 +475,10 @@ class BeatParryGame {
     ) {
       speed *= 0.8;
     }
-    return speed;
+    const modeMult = typeof GameConfig !== 'undefined'
+      ? GameConfig.getSpeedMult(this.playMode, { training: this.trainingMode, endless: this.endlessMode })
+      : 1;
+    return speed * modeMult;
   }
 
   getTrainingSummary() {
@@ -787,15 +805,17 @@ class BeatParryGame {
     if (this.overdriveWave && now - this.overdriveWave.startMs < this.overdriveWave.durationMs) return;
     if (now - (this.abilityState.lastOverdriveMs || 0) < 750) return;
 
-    const cosmic = this.isCosmicSkin();
+    const fx = this.getSpecialSkinFx();
+    const cosmic = fx === 'cosmic';
+    const fortune = fx === 'fortune';
     this.abilityState.lastOverdriveMs = now;
 
     const cx = this.playMode === 'dodge' || this.playMode === 'boss' ? this.playerX : this.centerX;
     const cy = this.playMode === 'dodge' || this.playMode === 'boss' ? this.playerY : this.centerY;
-    const maxR = Math.max(this.canvas.width, this.canvas.height) * (cosmic ? 0.62 : 0.55);
-    const durationMs = cosmic ? 900 : 550;
+    const maxR = Math.max(this.canvas.width, this.canvas.height) * (cosmic ? 0.62 : fortune ? 0.58 : 0.55);
+    const durationMs = cosmic ? 900 : fortune ? 820 : 550;
 
-    this.overdriveWave = { startMs: now, durationMs, maxRadius: maxR, cx, cy, cosmic };
+    this.overdriveWave = { startMs: now, durationMs, maxRadius: maxR, cx, cy, cosmic, fortune };
     if (cosmic) {
       this.overdriveWave2 = {
         startMs: now + 140,
@@ -804,20 +824,34 @@ class BeatParryGame {
         cx,
         cy,
         cosmic: true,
+        fortune: false,
       };
-      this.spawnCosmicConstellation(cx, cy, maxR, now);
+      this.overdriveFortuneFx = null;
+    } else if (fortune) {
+      this.overdriveWave2 = {
+        startMs: now + 120,
+        durationMs: 680,
+        maxRadius: maxR * 0.7,
+        cx,
+        cy,
+        cosmic: false,
+        fortune: true,
+      };
+      this.spawnFortuneOverdrive(cx, cy, maxR, now);
     } else {
       this.overdriveWave2 = null;
-      this.overdriveConstellation = null;
+      this.overdriveFortuneFx = null;
     }
 
-    this.screenShake = cosmic ? 22 : 14;
+    this.screenShake = cosmic ? 22 : fortune ? 18 : 14;
     audioEngine.playParrySound('excellent');
 
     const burstColors = cosmic
       ? ['#e040fb', '#40c4ff', '#b8f0ff', '#7b2cbf', '#ffffff']
-      : ['#ffd700', '#ffee88', '#ffffff'];
-    const burstCount = cosmic ? 48 : 28;
+      : fortune
+        ? ['#ffd700', '#ffec8b', '#ff9900', '#fff8dc', '#daa520']
+        : ['#ffd700', '#ffee88', '#ffffff'];
+    const burstCount = cosmic ? 48 : fortune ? 42 : 28;
 
     if (this.playMode === 'dodge' || this.playMode === 'boss') {
       let cleared = 0;
@@ -838,7 +872,7 @@ class BeatParryGame {
       }
       if (this.playMode === 'boss' && this.boss) {
         this.stunBoss(BOSS_STUN_MS, now);
-        const shockDamage = Math.floor(this.boss.maxHealth * (cosmic ? 0.18 : 0.1));
+        const shockDamage = Math.floor(this.boss.maxHealth * (cosmic ? 0.18 : fortune ? 0.14 : 0.1));
         this.damageBoss(shockDamage, now);
       }
       if (cleared > 0) {
@@ -846,12 +880,12 @@ class BeatParryGame {
         this.combo += cleared;
         this.maxCombo = Math.max(this.maxCombo, this.combo);
       }
-      if (cosmic || this.playMode === 'boss') {
-        this.dodgeInvincibleUntilMs = now + (cosmic ? 900 : 700);
+      if (cosmic || fortune || this.playMode === 'boss') {
+        this.dodgeInvincibleUntilMs = now + (cosmic ? 900 : fortune ? 780 : 700);
       }
       for (let i = 0; i < burstCount; i++) {
         const angle = (Math.PI * 2 * i) / burstCount + Math.random() * 0.4;
-        const speed = (cosmic ? 220 : 180) + Math.random() * (cosmic ? 280 : 220);
+        const speed = (cosmic ? 220 : fortune ? 200 : 180) + Math.random() * (cosmic ? 280 : fortune ? 240 : 220);
         this.particles.push({
           x: cx,
           y: cy,
@@ -859,7 +893,7 @@ class BeatParryGame {
           vy: Math.sin(angle) * speed,
           life: 1,
           color: burstColors[i % burstColors.length],
-          size: cosmic ? 4 + Math.random() * 6 : 5 + Math.random() * 5,
+          size: cosmic ? 4 + Math.random() * 6 : fortune ? 3 + Math.random() * 5 : 5 + Math.random() * 5,
         });
       }
       if (this.onScoreUpdate) {
@@ -886,7 +920,7 @@ class BeatParryGame {
       this.registerHit(RATING.EXCELLENT, note, note.side, note.lane);
     }
 
-    for (let i = 0; i < (cosmic ? 36 : 0); i++) {
+    for (let i = 0; i < (cosmic ? 36 : fortune ? 30 : 0); i++) {
       const angle = (Math.PI * 2 * i) / 36;
       const speed = 140 + Math.random() * 200;
       this.particles.push({
@@ -984,8 +1018,10 @@ class BeatParryGame {
   triggerVoidDash() {
     if (!this.hasAbility('op-void-dash')) return;
     const now = performance.now();
-    const cosmic = this.isCosmicSkin();
-    const DASH_MS = cosmic ? 460 : 380;
+    const fx = this.getSpecialSkinFx();
+    const cosmic = fx === 'cosmic';
+    const fortune = fx === 'fortune';
+    const DASH_MS = cosmic ? 460 : fortune ? 420 : 380;
 
     if (this.playMode === 'dodge' || this.playMode === 'boss') {
       const margin = this.ballRadius + 28;
@@ -1003,18 +1039,21 @@ class BeatParryGame {
         startMs: now,
         durationMs: DASH_MS,
         cosmic,
+        fortune,
       };
-      this.screenShake = cosmic ? 8 : 5;
-      audioEngine.playParrySound(cosmic ? 'excellent' : 'good');
+      this.screenShake = cosmic ? 8 : fortune ? 7 : 5;
+      audioEngine.playParrySound(cosmic || fortune ? 'excellent' : 'good');
 
       const burstColors = cosmic
         ? ['#e8f4ff', '#b8f0ff', '#e040fb', '#40c4ff', '#ffffff']
-        : ['#aa66ff'];
-      const burstCount = cosmic ? 36 : 20;
+        : fortune
+          ? ['#ffd700', '#ffec8b', '#fff8dc', '#ff9900', '#f0c040']
+          : ['#aa66ff'];
+      const burstCount = cosmic ? 36 : fortune ? 32 : 20;
       for (let i = 0; i < burstCount; i++) {
         const t = i / burstCount;
         const angle = Math.random() * Math.PI * 2;
-        const speed = cosmic ? 140 + Math.random() * 200 : 120 + Math.random() * 160;
+        const speed = cosmic ? 140 + Math.random() * 200 : fortune ? 130 + Math.random() * 180 : 120 + Math.random() * 160;
         this.particles.push({
           x: fromX + (this.playerX - fromX) * t,
           y: fromY + (this.playerY - fromY) * t,
@@ -1022,7 +1061,7 @@ class BeatParryGame {
           vy: Math.sin(angle) * speed,
           life: 1,
           color: burstColors[i % burstColors.length],
-          size: cosmic ? 2 + Math.random() * 5 : 3 + Math.random() * 4,
+          size: cosmic ? 2 + Math.random() * 5 : fortune ? 2 + Math.random() * 4 : 3 + Math.random() * 4,
         });
       }
 
@@ -1064,19 +1103,22 @@ class BeatParryGame {
       durationMs: DASH_MS,
       parry: true,
       cosmic,
+      fortune,
     };
     this.voidDashUntilMs = now + DASH_MS;
-    this.screenShake = cosmic ? 14 : 10;
-    if (!skippedCount) audioEngine.playParrySound(cosmic ? 'excellent' : 'medium');
+    this.screenShake = cosmic ? 14 : fortune ? 12 : 10;
+    if (!skippedCount) audioEngine.playParrySound(cosmic || fortune ? 'excellent' : 'medium');
 
     if (!skippedCount) {
       const burstColors = cosmic
         ? ['#e8f4ff', '#b8f0ff', '#e040fb', '#40c4ff', '#ffffff']
-        : ['#cc44ff'];
-      const burstCount = cosmic ? 40 : 24;
+        : fortune
+          ? ['#ffd700', '#ffec8b', '#fff8dc', '#ff9900', '#daa520']
+          : ['#cc44ff'];
+      const burstCount = cosmic ? 40 : fortune ? 36 : 24;
       for (let i = 0; i < burstCount; i++) {
-        const angle = (Math.PI * 2 * i) / burstCount + (cosmic ? Math.random() * 0.4 : 0);
-        const speed = cosmic ? 120 + Math.random() * 180 : 100 + Math.random() * 140;
+        const angle = (Math.PI * 2 * i) / burstCount + (cosmic || fortune ? Math.random() * 0.4 : 0);
+        const speed = cosmic ? 120 + Math.random() * 180 : fortune ? 110 + Math.random() * 160 : 100 + Math.random() * 140;
         this.particles.push({
           x: this.centerX,
           y: this.centerY,
@@ -1084,7 +1126,7 @@ class BeatParryGame {
           vy: Math.sin(angle) * speed,
           life: 1,
           color: burstColors[i % burstColors.length],
-          size: cosmic ? 3 + Math.random() * 5 : 4 + Math.random() * 3,
+          size: cosmic ? 3 + Math.random() * 5 : fortune ? 3 + Math.random() * 4 : 4 + Math.random() * 3,
         });
       }
 
@@ -1311,8 +1353,8 @@ class BeatParryGame {
       if (this.overdriveWave2 && now - this.overdriveWave2.startMs > this.overdriveWave2.durationMs) {
         this.overdriveWave2 = null;
       }
-      if (this.overdriveConstellation && now - this.overdriveConstellation.startMs > this.overdriveConstellation.durationMs) {
-        this.overdriveConstellation = null;
+      if (this.overdriveFortuneFx && now - this.overdriveFortuneFx.startMs > this.overdriveFortuneFx.durationMs) {
+        this.overdriveFortuneFx = null;
       }
       if (this.voidDashEffect && now - this.voidDashEffect.startMs > this.voidDashEffect.durationMs) {
         this.voidDashEffect = null;
@@ -1532,6 +1574,16 @@ class BeatParryGame {
     return this.activeSkin?.effect === 'cosmic' || this.activeSkin?.id === 'skin-void-god';
   }
 
+  isFortuneSkin() {
+    return this.activeSkin?.effect === 'fortune' || this.activeSkin?.id === 'skin-fortune-crown';
+  }
+
+  getSpecialSkinFx() {
+    if (this.isCosmicSkin()) return 'cosmic';
+    if (this.isFortuneSkin()) return 'fortune';
+    return null;
+  }
+
   initCosmicOrbitals() {
     if (!this.isCosmicSkin()) {
       this.cosmicOrbitals = [];
@@ -1543,6 +1595,21 @@ class BeatParryGame {
       speed: 0.6 + Math.random() * 1.4,
       size: 0.8 + Math.random() * 2.2,
       twinkle: Math.random() * Math.PI * 2,
+    }));
+  }
+
+  initFortuneOrbitals() {
+    if (!this.isFortuneSkin()) {
+      this.fortuneOrbitals = [];
+      return;
+    }
+    this.fortuneOrbitals = Array.from({ length: 10 }, () => ({
+      angle: Math.random() * Math.PI * 2,
+      dist: 0.55 + Math.random() * 0.55,
+      speed: 0.8 + Math.random() * 1.6,
+      size: 1 + Math.random() * 2.5,
+      twinkle: Math.random() * Math.PI * 2,
+      coin: Math.random() > 0.45,
     }));
   }
 
@@ -1562,6 +1629,18 @@ class BeatParryGame {
         star: Math.random() > 0.55,
       });
       if (this.skinTrail.length > 36) this.skinTrail.shift();
+    } else if (this.isFortuneSkin()) {
+      const palette = ['#ffd700', '#ffec8b', '#ff9900', '#fff8dc', '#daa520', '#f0c040'];
+      this.skinTrail.push({
+        x: x + (Math.random() - 0.5) * 10,
+        y: y + (Math.random() - 0.5) * 10,
+        life: 1,
+        color: palette[Math.floor(Math.random() * palette.length)],
+        size: 2 + Math.random() * 4.5,
+        star: Math.random() > 0.35,
+        coin: Math.random() > 0.6,
+      });
+      if (this.skinTrail.length > 32) this.skinTrail.shift();
     } else {
       this.skinTrail.push({
         x,
@@ -1575,7 +1654,7 @@ class BeatParryGame {
     }
 
     for (const point of this.skinTrail) {
-      point.life -= this.isCosmicSkin() ? 0.035 : 0.06;
+      point.life -= this.isCosmicSkin() ? 0.035 : this.isFortuneSkin() ? 0.045 : 0.06;
     }
     this.skinTrail = this.skinTrail.filter((point) => point.life > 0);
   }
@@ -1584,12 +1663,24 @@ class BeatParryGame {
     if (!this.skinTrail.length) return;
     for (const point of this.skinTrail) {
       ctx.save();
-      if (point.star) {
+      if (point.coin) {
+        const s = (point.size || 4) * point.life;
+        ctx.globalAlpha = point.life * 0.85;
+        ctx.fillStyle = point.color;
+        ctx.shadowColor = '#ffd700';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.ellipse(point.x, point.y, s * 1.1, s * 0.85, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 248, 220, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      } else if (point.star) {
         const s = point.size * point.life;
         ctx.globalAlpha = point.life * 0.9;
         ctx.fillStyle = point.color;
         ctx.shadowColor = point.color;
-        ctx.shadowBlur = 6;
+        ctx.shadowBlur = this.isFortuneSkin() ? 10 : 6;
         ctx.beginPath();
         ctx.arc(point.x, point.y, s, 0, Math.PI * 2);
         ctx.fill();
@@ -1693,8 +1784,148 @@ class BeatParryGame {
     ctx.stroke();
   }
 
+  drawFortuneSpark(ctx, x, y, size, alpha, rotation = 0) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+    ctx.globalAlpha = alpha;
+    const arm = size * 1.05;
+    const thick = Math.max(1.1, size * 0.16);
+
+    const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 1.6);
+    halo.addColorStop(0, 'rgba(255, 248, 220, 0.95)');
+    halo.addColorStop(0.4, 'rgba(255, 215, 0, 0.35)');
+    halo.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 1.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff8dc';
+    ctx.shadowColor = 'rgba(255, 215, 0, 0.95)';
+    ctx.shadowBlur = size * 0.85;
+    ctx.fillRect(-thick / 2, -arm, thick, arm * 2);
+    ctx.fillRect(-arm, -thick / 2, arm * 2, thick);
+
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.34, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffd700';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawFortunePlayer(ctx, x, y, r) {
+    const t = performance.now() * 0.001;
+    const colors = this.activeSkin?.colors || {};
+
+    const auraR = r + 36;
+    const aura = ctx.createRadialGradient(x, y, r * 0.1, x, y, auraR);
+    aura.addColorStop(0, 'rgba(255, 215, 0, 0.38)');
+    aura.addColorStop(0.45, 'rgba(255, 153, 0, 0.22)');
+    aura.addColorStop(0.75, 'rgba(184, 134, 11, 0.1)');
+    aura.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(x, y, auraR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(t * 0.35);
+    const rayCount = 8;
+    for (let i = 0; i < rayCount; i++) {
+      const angle = (Math.PI * 2 * i) / rayCount;
+      const len = r + 22 + Math.sin(t * 3 + i) * 4;
+      ctx.strokeStyle = `rgba(255, 236, 139, ${0.18 + Math.sin(t * 4 + i) * 0.08})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(angle) * (r + 4), Math.sin(angle) * (r + 4));
+      ctx.lineTo(Math.cos(angle) * len, Math.sin(angle) * len);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    for (const spark of this.fortuneOrbitals) {
+      spark.angle += spark.speed * 0.02;
+      const wobble = Math.sin(t * 2.5 + spark.twinkle) * 0.1;
+      const sx = x + Math.cos(spark.angle) * r * (spark.dist * 1.8 + wobble);
+      const sy = y + Math.sin(spark.angle) * r * (spark.dist * 0.9 + wobble);
+      const alpha = 0.5 + Math.sin(t * 5 + spark.twinkle) * 0.35;
+      if (spark.coin) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = colors.coin || '#f0c040';
+        ctx.shadowColor = '#ffd700';
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, spark.size, spark.size * 0.75, spark.angle, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        this.drawFortuneSpark(ctx, sx, sy, spark.size, alpha, t * 2 + spark.twinkle);
+      }
+    }
+
+    const body = ctx.createRadialGradient(x - r * 0.3, y - r * 0.32, 0, x, y, r);
+    body.addColorStop(0, colors.shimmer || '#fffacd');
+    body.addColorStop(0.2, colors.crown || '#ffec8b');
+    body.addColorStop(0.5, colors.primary || '#ffd700');
+    body.addColorStop(0.78, colors.glow || '#ff9900');
+    body.addColorStop(1, '#8b6914');
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = body;
+    ctx.shadowColor = 'rgba(255, 215, 0, 0.65)';
+    ctx.shadowBlur = 16;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.save();
+    ctx.globalAlpha = 0.9 + Math.sin(t * 6) * 0.1;
+    ctx.beginPath();
+    ctx.arc(x - r * 0.18, y - r * 0.2, r * 0.22, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fill();
+    ctx.restore();
+
+    const crownY = y - r - 2;
+    const crownW = r * 0.95;
+    ctx.save();
+    ctx.translate(x, crownY);
+    ctx.fillStyle = colors.primary || '#ffd700';
+    ctx.strokeStyle = colors.ring || '#daa520';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = 'rgba(255, 215, 0, 0.8)';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(-crownW * 0.5, 4);
+    ctx.lineTo(-crownW * 0.35, -r * 0.35);
+    ctx.lineTo(-crownW * 0.15, 2);
+    ctx.lineTo(0, -r * 0.48);
+    ctx.lineTo(crownW * 0.15, 2);
+    ctx.lineTo(crownW * 0.35, -r * 0.35);
+    ctx.lineTo(crownW * 0.5, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    const pulse = 1 + Math.sin(t * 4) * 0.06;
+    ctx.strokeStyle = this.ballColorToRgba(colors.ring || '#daa520', 0.7);
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(x, y, (r + 8) * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = this.ballColorToRgba(colors.glow || '#ff9900', 0.4);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, r + 5 + Math.sin(t * 2.5) * 2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
   drawSkinAura(ctx, x, y, r) {
-    if (this.isCosmicSkin()) return;
+    if (this.isCosmicSkin() || this.isFortuneSkin()) return;
     const ring = this.activeSkin?.colors?.ring;
     if (!ring && this.activeSkin?.tier < 4) return;
     const pulse = 1 + Math.sin(performance.now() * 0.006) * 0.08;
@@ -1718,6 +1949,11 @@ class BeatParryGame {
 
     if (this.isCosmicSkin()) {
       this.drawCosmicPlayer(ctx, this.centerX, this.centerY, r);
+      return;
+    }
+
+    if (this.isFortuneSkin()) {
+      this.drawFortunePlayer(ctx, this.centerX, this.centerY, r);
       return;
     }
 
@@ -1936,6 +2172,12 @@ class BeatParryGame {
       return;
     }
 
+    if (this.isFortuneSkin()) {
+      this.drawFortunePlayer(ctx, this.playerX, this.playerY, r);
+      if (invincible) ctx.restore();
+      return;
+    }
+
     ctx.beginPath();
     ctx.arc(this.playerX, this.playerY, r + 14, 0, Math.PI * 2);
     const glow = ctx.createRadialGradient(
@@ -1961,43 +2203,110 @@ class BeatParryGame {
     if (invincible) ctx.restore();
   }
 
-  spawnCosmicConstellation(cx, cy, maxR, startMs = performance.now()) {
-    const pattern = [
-      { ax: 0, ay: -0.36 },
-      { ax: 0.4, ay: -0.1 },
-      { ax: 0.26, ay: 0.4 },
-      { ax: -0.34, ay: 0.3 },
-      { ax: -0.46, ay: -0.2 },
-    ];
-    const stars = pattern.map((p, i) => {
-      const normR = Math.hypot(p.ax, p.ay) * 0.55;
-      const angle = Math.atan2(p.ay, p.ax);
-      return {
-        angle,
-        normR,
-        size: 9 + (i % 2) * 6,
-        spin: (Math.random() - 0.5) * 0.5,
-        dust: Array.from({ length: 22 }, () => {
-          const dist = 6 + Math.random() * 26;
-          const dAngle = Math.random() * Math.PI * 2;
-          return {
-            dist,
-            dAngle,
-            s: 0.4 + Math.random() * 1.6,
-          };
-        }),
-      };
-    });
-    this.overdriveConstellation = {
+  spawnFortuneOverdrive(cx, cy, maxR, startMs = performance.now()) {
+    this.overdriveFortuneFx = {
       startMs,
-      durationMs: 900,
+      durationMs: 850,
       cx,
       cy,
       maxRadius: maxR,
-      stars,
-      links: [[0, 1], [1, 2], [2, 3], [3, 4], [0, 2], [1, 4], [0, 3]],
-      spinSpeed: 0.85,
+      spinSpeed: 1.1,
+      coins: Array.from({ length: 28 }, (_, i) => ({
+        angle: (Math.PI * 2 * i) / 28 + Math.random() * 0.25,
+        dist: 0.12 + Math.random() * 0.42,
+        size: 3.5 + Math.random() * 4.5,
+        spin: Math.random() * Math.PI * 2,
+        wobble: Math.random() * Math.PI * 2,
+      })),
+      sparks: Array.from({ length: 16 }, (_, i) => ({
+        angle: (Math.PI * 2 * i) / 16,
+        len: 0.28 + Math.random() * 0.22,
+      })),
     };
+  }
+
+  drawFortuneCoin(ctx, x, y, size, alpha, rotation = 0) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#ffd700';
+    ctx.shadowColor = 'rgba(255, 215, 0, 0.9)';
+    ctx.shadowBlur = size * 1.2;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, size * 1.15, size * 0.85, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 248, 220, 0.85)';
+    ctx.lineWidth = Math.max(1, size * 0.14);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  drawFortuneOverdrive(ctx) {
+    const fx = this.overdriveFortuneFx;
+    const wave = this.overdriveWave;
+    if (!fx || !wave) return;
+
+    const now = performance.now();
+    const t = Math.min(1, (now - fx.startMs) / fx.durationMs);
+    const waveT = Math.min(1, Math.max(0, (now - wave.startMs) / wave.durationMs));
+    if (waveT <= 0 || waveT >= 1) return;
+
+    const waveRadius = wave.maxRadius * waveT;
+    const spin = t * fx.spinSpeed;
+    const alpha = waveT < 0.06 ? waveT / 0.06 : (t > 0.72 ? (1 - t) / 0.28 : 1);
+    if (alpha <= 0) return;
+
+    ctx.save();
+    ctx.translate(fx.cx, fx.cy);
+    ctx.rotate(spin * 0.35);
+    for (const ray of fx.sparks) {
+      const len = waveRadius * ray.len;
+      const inner = waveRadius * 0.08;
+      ctx.strokeStyle = `rgba(255, 236, 139, ${alpha * 0.35})`;
+      ctx.lineWidth = 2 + (1 - waveT) * 3;
+      ctx.shadowColor = 'rgba(255, 215, 0, 0.55)';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ray.angle) * inner, Math.sin(ray.angle) * inner);
+      ctx.lineTo(Math.cos(ray.angle) * len, Math.sin(ray.angle) * len);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    for (const coin of fx.coins) {
+      const a = coin.angle + spin;
+      const wobble = Math.sin(now * 0.006 + coin.wobble) * 0.06;
+      const r = (coin.dist + wobble) * waveRadius;
+      const x = fx.cx + Math.cos(a) * r;
+      const y = fx.cy + Math.sin(a) * r;
+      const coinAlpha = alpha * (0.55 + Math.sin(now * 0.008 + coin.wobble) * 0.25);
+      this.drawFortuneCoin(ctx, x, y, coin.size * (0.7 + waveT * 0.35), coinAlpha, coin.spin + t * 2.4);
+    }
+
+    const crownAlpha = alpha * 0.45 * (1 - t * 0.35);
+    if (crownAlpha > 0.05) {
+      const crownR = waveRadius * 0.22;
+      ctx.save();
+      ctx.translate(fx.cx, fx.cy - waveRadius * 0.04);
+      ctx.fillStyle = `rgba(255, 215, 0, ${crownAlpha})`;
+      ctx.strokeStyle = `rgba(218, 165, 32, ${crownAlpha * 0.9})`;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(255, 215, 0, 0.65)';
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.moveTo(-crownR, crownR * 0.2);
+      ctx.lineTo(-crownR * 0.7, -crownR * 0.55);
+      ctx.lineTo(-crownR * 0.25, crownR * 0.05);
+      ctx.lineTo(0, -crownR * 0.75);
+      ctx.lineTo(crownR * 0.25, crownR * 0.05);
+      ctx.lineTo(crownR * 0.7, -crownR * 0.55);
+      ctx.lineTo(crownR, crownR * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   drawSparkStar(ctx, x, y, size, alpha, rotation = 0) {
@@ -2029,77 +2338,9 @@ class BeatParryGame {
     ctx.restore();
   }
 
-  drawOverdriveConstellation(ctx) {
-    const constellation = this.overdriveConstellation;
-    const wave = this.overdriveWave;
-    if (!constellation || !wave) return;
-
-    const now = performance.now();
-    const t = Math.min(1, (now - constellation.startMs) / constellation.durationMs);
-    const waveT = Math.min(1, Math.max(0, (now - wave.startMs) / wave.durationMs));
-    if (waveT <= 0 || waveT >= 1) return;
-
-    const waveRadius = wave.maxRadius * waveT;
-    const spin = t * constellation.spinSpeed;
-    const alpha = waveT < 0.06 ? waveT / 0.06 : (t > 0.7 ? (1 - t) / 0.3 : 1);
-    if (alpha <= 0) return;
-
-    const placed = constellation.stars.map((star) => {
-      const a = star.angle + spin;
-      const r = star.normR * waveRadius;
-      return {
-        x: constellation.cx + Math.cos(a) * r,
-        y: constellation.cy + Math.sin(a) * r,
-        size: star.size,
-        dust: star.dust,
-        starSpin: star.spin + t * Math.PI * 1.6,
-        baseAngle: a,
-      };
-    });
-
-    ctx.save();
-    ctx.globalAlpha = alpha * 0.55;
-    for (const dot of placed) {
-      for (const d of dot.dust) {
-        const dustAngle = d.dAngle + spin;
-        const px = dot.x + Math.cos(dustAngle) * d.dist;
-        const py = dot.y + Math.sin(dustAngle) * d.dist;
-        ctx.fillStyle = 'rgba(255,255,255,0.9)';
-        ctx.beginPath();
-        ctx.arc(px, py, d.s, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    ctx.restore();
-
-    if (waveT > 0.2) {
-      ctx.save();
-      ctx.globalAlpha = alpha * 0.85;
-      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-      ctx.lineWidth = 1.2;
-      ctx.shadowColor = 'rgba(184, 240, 255, 0.8)';
-      ctx.shadowBlur = 6;
-      for (const [a, b] of constellation.links) {
-        const s1 = placed[a];
-        const s2 = placed[b];
-        if (!s1 || !s2) continue;
-        ctx.beginPath();
-        ctx.moveTo(s1.x, s1.y);
-        ctx.lineTo(s2.x, s2.y);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
-    for (const star of placed) {
-      const sizeScale = 0.65 + waveT * 0.35;
-      this.drawSparkStar(ctx, star.x, star.y, star.size * sizeScale, alpha, star.starSpin);
-    }
-  }
-
   drawOverdriveRing(ctx, wave, opts = {}) {
     const now = performance.now();
-    const { startMs, durationMs, maxRadius, cx, cy, cosmic } = wave;
+    const { startMs, durationMs, maxRadius, cx, cy, cosmic, fortune } = wave;
     const t = Math.min(1, (now - startMs) / durationMs);
     if (t <= 0 || t >= 1) return;
 
@@ -2132,6 +2373,31 @@ class BeatParryGame {
       ctx.beginPath();
       ctx.arc(cx, cy, radius * 0.82, 0, Math.PI * 2);
       ctx.stroke();
+    } else if (fortune) {
+      const gold = ctx.createRadialGradient(cx, cy, radius * 0.15, cx, cy, radius);
+      gold.addColorStop(0, `rgba(255, 248, 220, ${alpha * 0.42})`);
+      gold.addColorStop(0.35, `rgba(255, 215, 0, ${alpha * 0.32})`);
+      gold.addColorStop(0.68, `rgba(255, 153, 0, ${alpha * 0.2})`);
+      gold.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = gold;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = `rgba(255, 215, 0, ${alpha * 0.95})`;
+      ctx.lineWidth = 4 + (1 - t) * 10;
+      ctx.shadowColor = `rgba(255, 153, 0, ${alpha})`;
+      ctx.shadowBlur = 18 + (1 - t) * 26;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = `rgba(255, 248, 220, ${alpha * 0.75})`;
+      ctx.lineWidth = 1.5 + (1 - t) * 3;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.84, 0, Math.PI * 2);
+      ctx.stroke();
     } else {
       ctx.strokeStyle = `rgba(255, 220, 80, ${alpha})`;
       ctx.lineWidth = 3 + (1 - t) * 10;
@@ -2153,15 +2419,114 @@ class BeatParryGame {
     if (this.overdriveWave) {
       this.drawOverdriveRing(ctx, this.overdriveWave);
     }
-    if (this.overdriveConstellation) {
-      this.drawOverdriveConstellation(ctx);
+    if (this.overdriveFortuneFx) {
+      this.drawFortuneOverdrive(ctx);
     }
+  }
+
+  drawFortuneVoidDash(ctx, fromX, fromY, toX, toY, cx, cy, t, alpha, parry) {
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const dist = Math.hypot(dx, dy) || 1;
+    const nx = dx / dist;
+    const ny = dy / dist;
+
+    ctx.save();
+
+    const trailSteps = parry ? 10 : Math.max(8, Math.floor(dist / 28));
+    for (let i = 0; i <= trailSteps; i++) {
+      const stepT = (i / trailSteps) * t;
+      const px = fromX + dx * stepT;
+      const py = fromY + dy * stepT;
+      const stepAlpha = alpha * (0.25 + (1 - stepT) * 0.55);
+
+      const ringR = parry ? 30 + (1 - stepT) * 48 : 12 + (1 - stepT) * 20;
+      const glow = ctx.createRadialGradient(px, py, 0, px, py, ringR);
+      glow.addColorStop(0, `rgba(255, 248, 220, ${stepAlpha * 0.5})`);
+      glow.addColorStop(0.4, `rgba(255, 215, 0, ${stepAlpha * 0.3})`);
+      glow.addColorStop(0.75, `rgba(255, 153, 0, ${stepAlpha * 0.12})`);
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(px, py, ringR, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (i % 2 === 0) {
+        this.drawFortuneCoin(ctx, px, py, 4 + (1 - stepT) * 3.5, stepAlpha * 0.9, stepT * Math.PI * 2.5);
+      }
+    }
+
+    if (!parry || dist > 4) {
+      ctx.globalAlpha = alpha * 0.9;
+      ctx.strokeStyle = 'rgba(255, 236, 139, 0.9)';
+      ctx.lineWidth = 1.6;
+      ctx.shadowColor = 'rgba(255, 215, 0, 0.85)';
+      ctx.shadowBlur = 10;
+      ctx.setLineDash([5, 9]);
+      ctx.beginPath();
+      ctx.moveTo(fromX, fromY);
+      ctx.lineTo(cx, cy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const perpX = -ny;
+      const perpY = nx;
+      const linkCount = parry ? 5 : Math.max(3, Math.floor(dist / 60));
+      for (let i = 1; i < linkCount; i++) {
+        const lt = i / linkCount;
+        const lx = fromX + dx * lt * t;
+        const ly = fromY + dy * lt * t;
+        const spread = parry ? 42 + (1 - lt) * 32 : 20 + (1 - lt) * 16;
+        ctx.beginPath();
+        ctx.moveTo(lx - perpX * spread, ly - perpY * spread);
+        ctx.lineTo(lx + perpX * spread, ly + perpY * spread);
+        ctx.stroke();
+      }
+    }
+
+    const headR = parry ? 52 + (1 - t) * 40 : 22 + (1 - t) * 18;
+    const headGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, headR);
+    headGlow.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.5})`);
+    headGlow.addColorStop(0.35, `rgba(255, 215, 0, ${alpha * 0.38})`);
+    headGlow.addColorStop(0.7, `rgba(255, 153, 0, ${alpha * 0.16})`);
+    headGlow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = headGlow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, headR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(255, 248, 220, ${alpha * 0.92})`;
+    ctx.lineWidth = 2.5 + (1 - t) * 3.5;
+    ctx.shadowBlur = 16;
+    ctx.beginPath();
+    ctx.arc(cx, cy, headR * 0.55, 0, Math.PI * 2);
+    ctx.stroke();
+
+    this.drawFortuneCoin(ctx, cx, cy, 9 + (1 - t) * 7, alpha, t * Math.PI * 3);
+
+    if (parry) {
+      const ringCount = 3;
+      for (let i = 0; i < ringCount; i++) {
+        const ringT = Math.min(1, t * 1.2 + i * 0.08);
+        const ringR = 38 + ringT * (110 + i * 28);
+        const ringAlpha = alpha * (0.7 - i * 0.18) * (1 - ringT * 0.5);
+        ctx.strokeStyle = i % 2 === 0
+          ? `rgba(255, 215, 0, ${ringAlpha})`
+          : `rgba(255, 153, 0, ${ringAlpha})`;
+        ctx.lineWidth = 2 + (1 - ringT) * 3;
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
   }
 
   drawVoidDashEffect(ctx) {
     if (!this.voidDashEffect) return;
     const now = performance.now();
-    const { fromX, fromY, toX, toY, startMs, durationMs, parry, cosmic } = this.voidDashEffect;
+    const { fromX, fromY, toX, toY, startMs, durationMs, parry, cosmic, fortune } = this.voidDashEffect;
     const t = Math.min(1, (now - startMs) / durationMs);
     const alpha = (1 - t) * 0.9;
     const cx = fromX + (toX - fromX) * t;
@@ -2169,6 +2534,11 @@ class BeatParryGame {
 
     if (cosmic) {
       this.drawCosmicVoidDash(ctx, fromX, fromY, toX, toY, cx, cy, t, alpha, parry);
+      return;
+    }
+
+    if (fortune) {
+      this.drawFortuneVoidDash(ctx, fromX, fromY, toX, toY, cx, cy, t, alpha, parry);
       return;
     }
 
@@ -2548,6 +2918,7 @@ class BeatParryGame {
         color: weapon.color,
         glow: weapon.glow,
         cosmic: !!weapon.cosmic,
+        fortune: !!weapon.fortune,
         pierce: !!weapon.pierce,
         life: 1.2,
       });
@@ -2556,6 +2927,8 @@ class BeatParryGame {
     this.playerNextFireMs = nowMs + intervalMs;
     if (weapon.cosmic && Math.random() < 0.35) {
       audioEngine.playParrySound('good');
+    } else if (weapon.fortune && Math.random() < 0.25) {
+      audioEngine.playParrySound('good');
     }
   }
 
@@ -2563,9 +2936,10 @@ class BeatParryGame {
     if (!this.boss || this.bossRoundCleared) return;
     const round = this.bossRound;
     const kit = this.bossRoundKit || getBossRoundKit(round);
-    const interval = getBossAttackInterval(round) * 1000;
+    const bossSpeedMult = typeof GameConfig !== 'undefined' ? GameConfig.getSpeedMult('boss') : 1;
+    const interval = (getBossAttackInterval(round) * 1000) / bossSpeedMult;
     const warningMs = 520 * (this.hasAbility('long-warning') ? 1.35 : 1);
-    const speed = getBossProjectileSpeed(round);
+    const speed = getBossProjectileSpeed(round) * bossSpeedMult;
 
     while (this.bossNextAttackMs <= nowMs + warningMs + 80) {
       const attackDef = pickBossAttack(kit, this.bossAttackIndex++);
@@ -2762,8 +3136,8 @@ class BeatParryGame {
         const dx = this.playerX - minion.x;
         const dy = this.playerY - minion.y;
         const dist = Math.hypot(dx, dy) || 1;
-        minion.x += (dx / dist) * minion.speed * dt;
-        minion.y += (dy / dist) * minion.speed * dt;
+        minion.x += (dx / dist) * minion.speed * (typeof GameConfig !== 'undefined' ? GameConfig.getSpeedMult('boss') : 1) * dt;
+        minion.y += (dy / dist) * minion.speed * (typeof GameConfig !== 'undefined' ? GameConfig.getSpeedMult('boss') : 1) * dt;
       } else if (this.boss) {
         const orbitR = this.boss.radius + 54 + minion.size;
         minion.x = this.boss.x + Math.cos(minion.wobblePhase) * orbitR;
@@ -3194,6 +3568,8 @@ class BeatParryGame {
 
     if (this.isCosmicSkin()) {
       this.drawCosmicPlayer(ctx, this.playerX, this.playerY, r);
+    } else if (this.isFortuneSkin()) {
+      this.drawFortunePlayer(ctx, this.playerX, this.playerY, r);
     } else {
       const ballColor = this.getPlayerBallColor();
       ctx.beginPath();
@@ -3216,23 +3592,28 @@ class BeatParryGame {
       const target = this.getBossAimTarget();
       if (target) {
         const angle = Math.atan2(target.y - this.playerY, target.x - this.playerX);
-        const gunLen = weapon.cosmic ? 22 : 16;
+        const gunLen = weapon.cosmic ? 22 : weapon.fortune ? 20 : 16;
         const gx = this.playerX + Math.cos(angle) * (r + 4);
         const gy = this.playerY + Math.sin(angle) * (r + 4);
         ctx.save();
         ctx.translate(gx, gy);
         ctx.rotate(angle);
-        ctx.fillStyle = weapon.cosmic ? '#e040fb' : weapon.color;
-        ctx.strokeStyle = weapon.cosmic ? '#b8f0ff' : '#ffffff';
+        ctx.fillStyle = weapon.cosmic ? '#e040fb' : weapon.fortune ? '#ffd700' : weapon.color;
+        ctx.strokeStyle = weapon.cosmic ? '#b8f0ff' : weapon.fortune ? '#fff8dc' : '#ffffff';
         ctx.lineWidth = 2;
         if (weapon.cosmic) {
           ctx.shadowColor = '#40c4ff';
           ctx.shadowBlur = 12;
+        } else if (weapon.fortune) {
+          ctx.shadowColor = '#ff9900';
+          ctx.shadowBlur = 10;
         }
         ctx.fillRect(0, -3, gunLen, 6);
         ctx.strokeRect(0, -3, gunLen, 6);
         if (weapon.cosmic) {
           this.drawSparkStar(ctx, gunLen + 2, 0, 4, 0.8, performance.now() / 300);
+        } else if (weapon.fortune) {
+          this.drawFortuneSpark(ctx, gunLen + 2, 0, 3.5, 0.85, performance.now() / 250);
         }
         ctx.restore();
 
@@ -3259,6 +3640,8 @@ class BeatParryGame {
       ctx.globalAlpha = Math.min(1, shot.life);
       if (shot.cosmic) {
         this.drawSparkStar(ctx, shot.x, shot.y, shot.size * 1.2, 0.9, performance.now() / 200);
+      } else if (shot.fortune) {
+        this.drawFortuneSpark(ctx, shot.x, shot.y, shot.size * 1.15, 0.92, performance.now() / 180);
       } else {
         ctx.beginPath();
         ctx.arc(shot.x, shot.y, shot.size, 0, Math.PI * 2);

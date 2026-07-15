@@ -31,7 +31,7 @@
     <div id="user-modal" class="user-modal hidden">
       <div class="user-modal-card">
         <h2 id="auth-modal-title">Account</h2>
-        <p class="auth-modal-desc">Create an account or log in. Your RUD, scores, and shop progress are saved in SQLite.</p>
+        <p class="auth-modal-desc">Create an account or log in. Usernames are unique (case-insensitive) and saved in SQLite.</p>
         <div class="auth-tabs">
           <button type="button" id="auth-tab-login" class="auth-tab active">Log in</button>
           <button type="button" id="auth-tab-register" class="auth-tab">Register</button>
@@ -46,6 +46,8 @@
       </div>
     </div>
 
+    <div id="admin-announcement-bar" class="admin-announcement-bar hidden"></div>
+
     <canvas id="game-canvas"></canvas>
 
     <div id="menu" class="screen active">
@@ -57,9 +59,11 @@
         <button type="button" id="tab-training" class="menu-tab">Training</button>
         <button type="button" id="tab-dodge" class="menu-tab">Dodge</button>
         <button type="button" id="tab-boss" class="menu-tab">Boss</button>
-        <button type="button" id="tab-shop" class="menu-tab">Shop</button>
+        <button type="button" id="tab-shop" class="menu-tab">Inventory</button>
+        <button type="button" id="tab-wheel" class="menu-tab">Spin</button>
         <button type="button" id="tab-skins" class="menu-tab">Skins</button>
         <button type="button" id="tab-sounds" class="menu-tab">Sounds</button>
+        <button type="button" id="tab-admin" class="menu-tab hidden">Admin</button>
       </div>
 
       <div id="loadout-bar" class="loadout-bar"></div>
@@ -91,7 +95,7 @@
       </div>
 
       <div id="shop-panel" class="menu-panel hidden">
-        <p class="shop-intro">Spend RUD on one-run abilities. Equip up to 2 shop abilities plus any secret skills (Overdrive & Void Dash can both be equipped).</p>
+        <p class="shop-intro">Equip skills for your next run. Earn abilities from the Spin tab — equipped skills are consumed when you start a run (secret skills are permanent).</p>
         <div class="shop-redeem">
           <label for="shop-code-input" class="shop-redeem-label">Have a secret code?</label>
           <div class="shop-redeem-row">
@@ -103,8 +107,27 @@
         <div id="shop-list" class="shop-list"></div>
       </div>
 
+      <div id="wheel-panel" class="menu-panel hidden">
+        <p class="shop-intro">Pull the slot machine for RUD, skills, skins, and bonus spins. One free spin every 24 hours — or pay RUD for extra tries. Match all three reels for your prize. <strong>Fortune Crown</strong> is the rarest jackpot — spin-exclusive, second only to Void God.</p>
+        <div class="slot-machine">
+          <div class="slot-machine-top">🎰 PRIZE SLOTS 🎰</div>
+          <div class="slot-machine-frame">
+            <div class="slot-win-line" aria-hidden="true"></div>
+            <div id="slot-reels" class="slot-reels"></div>
+          </div>
+        </div>
+        <p id="wheel-status" class="wheel-status">Log in to spin.</p>
+        <p id="wheel-result" class="wheel-result hidden"></p>
+        <p id="wheel-error" class="wheel-error hidden"></p>
+        <div class="wheel-actions">
+          <button type="button" id="wheel-spin-free-btn" class="btn" disabled>Free Spin</button>
+          <button type="button" id="wheel-spin-paid-btn" class="btn btn-secondary" disabled>Spin (150 RUD)</button>
+        </div>
+        <div id="wheel-prize-list" class="wheel-prize-list"></div>
+      </div>
+
       <div id="skins-panel" class="menu-panel hidden">
-        <p class="shop-intro">Buy permanent skins with RUD. Better skins cost more and grant passive bonuses every run. Equip one skin — it changes your ball look and stats.</p>
+        <p class="shop-intro">Equip a skin you own. Skins are earned from the Spin tab, secret codes, or come free by default. Each skin changes your look and grants passive bonuses.</p>
         <div id="skins-list" class="shop-list skins-list"></div>
       </div>
 
@@ -113,6 +136,8 @@
         <div id="sound-list" class="sound-list"></div>
         <button type="button" id="sound-reset-btn" class="btn btn-secondary sound-reset-btn">Reset to Normal Sound</button>
       </div>
+
+      <div id="admin-panel" class="menu-panel hidden"></div>
 
       <div class="controls-hint">
         <span><kbd>F</kbd> <kbd>J</kbd> — Easy (1 layer)</span>
@@ -175,9 +200,12 @@
   </div>
 
   <script src="js/songs.js?v=8"></script>
-  <script src="js/currency.js?v=14"></script>
+  <script src="js/currency.js?v=16"></script>
   <script src="js/shop.js?v=14"></script>
-  <script src="js/skins.js?v=5"></script>
+  <script src="js/skins.js?v=6"></script>
+  <script src="js/gameConfig.js?v=1"></script>
+  <script src="js/prizeWheel.js?v=5"></script>
+  <script src="js/admin.js?v=2"></script>
   <script src="js/training.js?v=6"></script>
   <script src="js/dodge.js?v=7"></script>
   <script src="js/boss.js?v=2"></script>

@@ -4,6 +4,24 @@ const TOKEN_KEY = 'beatParryAuthToken';
 
 const GRADE_RUD_MULT = { S: 2, A: 1.6, B: 1.3, C: 1, D: 0.7, F: 0.4 };
 
+const RUD_SHORT_SUFFIXES = ['', 'K', 'M', 'B', 'T', 'Qa', 'Qi', 'Sx', 'Sp', 'Oc', 'No', 'Dc'];
+
+function formatRudShort(value) {
+  const num = Number(value) || 0;
+  if (!Number.isFinite(num)) return '0';
+  const abs = Math.abs(num);
+  if (abs < 10_000) return num.toLocaleString();
+
+  const tier = Math.min(
+    RUD_SHORT_SUFFIXES.length - 1,
+    Math.floor(Math.log10(abs) / 3)
+  );
+  const scaled = num / 10 ** (tier * 3);
+  const decimals = Math.abs(scaled) >= 100 ? 0 : Math.abs(scaled) >= 10 ? 1 : 2;
+  const text = scaled.toFixed(decimals).replace(/\.?0+$/, '');
+  return `${text}${RUD_SHORT_SUFFIXES[tier]}`;
+}
+
 const RUDWallet = {
   userId: null,
   username: '',
@@ -12,6 +30,7 @@ const RUDWallet = {
   token: null,
   ready: false,
   canRedeemSecrets: false,
+  isAdmin: false,
 
   getStoredUserId() {
     const raw = localStorage.getItem(USER_ID_KEY);
@@ -46,6 +65,7 @@ const RUDWallet = {
     this.bestScores = {};
     this.ready = false;
     this.canRedeemSecrets = false;
+    this.isAdmin = false;
     if (typeof Shop !== 'undefined') {
       Shop.setSecretUnlocks([]);
     }
@@ -89,6 +109,7 @@ const RUDWallet = {
     this.balance = data.balance;
     this.bestScores = data.bestScores || {};
     this.canRedeemSecrets = !!data.canRedeemSecrets;
+    this.isAdmin = !!data.isAdmin;
     this.storeSession(data.id, data.username, data.token || this.token);
     this.ready = true;
     if (typeof Shop !== 'undefined') {
@@ -105,6 +126,17 @@ const RUDWallet = {
         Skins.equipped = data.equippedSkin;
         Skins.saveEquipped();
       }
+    }
+    if (typeof PrizeWheel !== 'undefined') {
+      PrizeWheel.setWheelState({
+        freeSpinAvailable: data.freeSpinAvailable,
+        wheelBonusSpins: data.wheelBonusSpins,
+        nextFreeSpinAt: data.nextFreeSpinAt,
+        spinCost: data.spinCost,
+      });
+    }
+    if (typeof AdminPanel !== 'undefined') {
+      AdminPanel.setVisible(!!data.isAdmin);
     }
   },
 
