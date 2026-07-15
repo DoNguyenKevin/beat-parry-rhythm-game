@@ -2,3 +2,8 @@ node_modules/
 data/
 *.db
 .DS_Store
+.env
+.env.local
+.agents/
+.claude/
+AGENTS.local.md
