@@ -4,6 +4,8 @@ data/
 .DS_Store
 .env
 .env.local
+.dev.vars
+.wrangler/
 .agents/
 .claude/
 AGENTS.local.md
