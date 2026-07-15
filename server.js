@@ -707,10 +707,14 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: 'Server error. Try restarting with npm run restart.' });
 });
 
-async function start() {
+async function prepareServer() {
   db.getDatabaseUrl();
   await db.runMigrations();
   await ensureSecretEligibleAccounts();
+}
+
+async function start() {
+  await prepareServer();
   app.listen(PORT, () => {
     console.log(`Beat Parry server running at http://localhost:${PORT}`);
     console.log('API routes: POST /api/auth/register, POST /api/auth/login, GET /api/auth/me, POST /api/auth/logout');
@@ -719,7 +723,7 @@ async function start() {
   });
 }
 
-module.exports = { app, start };
+module.exports = { app, start, prepareServer };
 
 if (require.main === module) {
   start().catch((err) => {
