@@ -92,6 +92,36 @@ npm start
 
 Then open http://localhost:3000
 
+## Deploy to Cloudflare Workers
+
+The game frontend is static files; the API runs as an Express worker script. Cloudflare **does not allow environment variables on Workers that only serve static assets** — you need a `main` worker entry (see `worker/index.js` and `wrangler.jsonc`).
+
+### One-time setup
+
+```bash
+npm install
+cp .dev.vars.example .dev.vars   # add your Neon connection strings
+npx wrangler login
+npx wrangler secret put DATABASE_URL
+npx wrangler secret put DATABASE_URL_DIRECT   # optional; used for migrations
+```
+
+### Local Workers dev
+
+```bash
+npm run cf:dev
+```
+
+Opens the app at http://localhost:8787 (static assets + `/api/*` on the same origin).
+
+### Production deploy
+
+```bash
+npm run cf:deploy
+```
+
+After deploy, add or edit secrets in the Cloudflare dashboard under **Workers & Pages → beat-parry-rhythm-game → Settings → Variables and Secrets**.
+
 ## Ratings
 
 - **Excellent** — perfect timing (300 pts)

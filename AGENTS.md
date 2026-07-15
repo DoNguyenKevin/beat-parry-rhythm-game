@@ -80,6 +80,15 @@ Default section order:
 
 When the user requests a durable behavior change, record it here or in the relevant child AGENTS.md
 
+## Knowledge stores
+
+- `docs/solutions/` — documented solutions to past problems (bugs, integration issues, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`). Relevant when implementing or debugging in documented areas.
+- `CONCEPTS.md` — shared domain vocabulary (entities, named processes, deployment concepts). Relevant when orienting to the codebase or discussing domain terms.
+
 ## Child DOX Index
 
-This project is not yet indexed. Before continuing you must scan the project, build the DOX tree and replace this message with the actual index. Go deep and scan files recursively to properly evaluate complexity and create nested DOX files where needed.
+- `worker/` — Cloudflare Worker entry (`index.js`) bridging Express to `cloudflare:node`; no child AGENTS.md yet
+- `docs/solutions/` — compounded learnings; category subfolders own individual solution docs
+- `migrations/` — Postgres schema migrations for Neon
+- `test/` — API integration tests
+- `scripts/` — one-off tooling (sound generation, SQLite import, server stop)
