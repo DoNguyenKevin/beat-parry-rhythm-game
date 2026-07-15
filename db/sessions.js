@@ -28,7 +28,12 @@ async function getSessionUser(token, client) {
     await query('DELETE FROM user_sessions WHERE token = $1', [token], client);
     return null;
   }
-  return row;
+  return {
+    ...row,
+    user_id: Number(row.user_id),
+    id: Number(row.id),
+    rud_balance: Number(row.rud_balance),
+  };
 }
 
 async function deleteSession(token, client) {

@@ -6,3 +6,4 @@ data/
 .env.local
 .agents/
 .claude/
+AGENTS.local.md

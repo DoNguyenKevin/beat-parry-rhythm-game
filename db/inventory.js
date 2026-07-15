@@ -37,12 +37,15 @@ async function consumeInventory(userId, abilityIds, client) {
   }
 
   for (const abilityId of abilityIds) {
-    await query(
+    const result = await query(
       `UPDATE user_inventory SET quantity = quantity - 1
        WHERE user_id = $1 AND ability_id = $2 AND quantity > 0`,
       [userId, abilityId],
       client
     );
+    if (result.rowCount === 0) {
+      return { ok: false, error: `Not enough ${abilityId} in inventory.` };
+    }
     await query(
       'DELETE FROM user_inventory WHERE user_id = $1 AND ability_id = $2 AND quantity <= 0',
       [userId, abilityId],

@@ -138,10 +138,11 @@ function requireAuth(req, res, next) {
         return res.status(401).json({ error: 'Not logged in. Please sign in again.' });
       }
       const routeUserId = parseInt(req.params.id, 10);
-      if (routeUserId !== session.user_id) {
+      const sessionUserId = Number(session.user_id);
+      if (routeUserId !== sessionUserId) {
         return res.status(403).json({ error: 'You can only access your own account.' });
       }
-      req.authUserId = session.user_id;
+      req.authUserId = sessionUserId;
       req.authToken = token;
       next();
     })
@@ -425,9 +426,6 @@ app.post('/api/users/:id/buy-skin', requireAuth, async (req, res, next) => {
     if (await ownsSkin(userId, skinId)) {
       return res.status(400).json({ error: 'You already own this skin.' });
     }
-    if (user.rud_balance < skin.price) {
-      return res.status(400).json({ error: 'Not enough RUD.' });
-    }
 
     try {
       await db.withTransaction(async (client) => {
@@ -489,10 +487,6 @@ app.post('/api/users/:id/buy', requireAuth, async (req, res, next) => {
     const item = SHOP_ITEMS[abilityId];
     if (!item) return res.status(400).json({ error: 'Unknown ability.' });
     if (item.secret) return res.status(400).json({ error: 'This ability cannot be purchased.' });
-
-    if (user.rud_balance < item.price) {
-      return res.status(400).json({ error: 'Not enough RUD.' });
-    }
 
     try {
       await db.withTransaction(async (client) => {

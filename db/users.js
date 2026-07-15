@@ -6,7 +6,13 @@ async function getUser(id, client) {
     [id],
     client
   );
-  return result.rows[0];
+  return result.rows[0]
+    ? {
+      ...result.rows[0],
+      id: Number(result.rows[0].id),
+      rud_balance: Number(result.rows[0].rud_balance),
+    }
+    : undefined;
 }
 
 async function getUserByUsername(username, client) {
@@ -15,7 +21,13 @@ async function getUserByUsername(username, client) {
     [username],
     client
   );
-  return result.rows[0];
+  return result.rows[0]
+    ? {
+      ...result.rows[0],
+      id: Number(result.rows[0].id),
+      rud_balance: Number(result.rows[0].rud_balance),
+    }
+    : undefined;
 }
 
 async function findUserForRegister(username, client, { forUpdate = false } = {}) {
@@ -25,7 +37,13 @@ async function findUserForRegister(username, client, { forUpdate = false } = {})
     [username],
     client
   );
-  return result.rows[0];
+  return result.rows[0]
+    ? {
+      id: Number(result.rows[0].id),
+      username: result.rows[0].username,
+      password_hash: result.rows[0].password_hash,
+    }
+    : undefined;
 }
 
 async function insertUser(username, passwordHash, client) {
@@ -34,7 +52,7 @@ async function insertUser(username, passwordHash, client) {
     [username, passwordHash],
     client
   );
-  return result.rows[0].id;
+  return Number(result.rows[0].id);
 }
 
 async function updateUserPassword(id, passwordHash, client) {
@@ -51,7 +69,7 @@ async function debitBalance(userId, amount, client) {
     [amount, userId],
     client
   );
-  return result.rows[0]?.rud_balance ?? null;
+  return result.rows[0]?.rud_balance == null ? null : Number(result.rows[0].rud_balance);
 }
 
 async function creditBalance(userId, amount, client) {
@@ -60,7 +78,7 @@ async function creditBalance(userId, amount, client) {
     [amount, userId],
     client
   );
-  return result.rows[0].rud_balance;
+  return Number(result.rows[0].rud_balance);
 }
 
 async function getEquippedSkinField(userId, client) {

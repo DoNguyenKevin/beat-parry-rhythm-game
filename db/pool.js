@@ -14,6 +14,7 @@ function getDatabaseUrl() {
 
 function getDirectDatabaseUrl() {
   if (process.env.DATABASE_URL_DIRECT) return process.env.DATABASE_URL_DIRECT;
+  if (process.env.DATABASE_URL_UNPOOLED) return process.env.DATABASE_URL_UNPOOLED;
   return getDatabaseUrl().replace('-pooler', '');
 }
 
@@ -46,6 +47,14 @@ function resetPool() {
   pool = null;
 }
 
+async function closePool() {
+  if (pool) {
+    const current = pool;
+    pool = null;
+    await current.end();
+  }
+}
+
 async function query(text, params, client) {
   const executor = client || getPool();
   return executor.query(text, params);
@@ -76,6 +85,7 @@ module.exports = {
   getTestDatabaseUrl,
   getPool,
   resetPool,
+  closePool,
   query,
   withTransaction,
   checkConnectivity,
