@@ -2308,6 +2308,7 @@ class BeatParryGame {
       round,
       signature: kit.signature,
       wobblePhase: Math.random() * Math.PI * 2,
+      eyeCloseT: 0,
     };
     this.bossRound = round;
     this.trainingLevel = round;
@@ -2683,6 +2684,9 @@ class BeatParryGame {
 
     if (this.boss.hitFlash > 0) this.boss.hitFlash = Math.max(0, this.boss.hitFlash - dt * 4);
     if (this.boss.stunPulse > 0) this.boss.stunPulse = Math.max(0, this.boss.stunPulse - dt * 2.5);
+    if (this.bossRoundCleared) {
+      this.boss.eyeCloseT = Math.min(1, (this.boss.eyeCloseT || 0) + dt * 3.5);
+    }
     this.boss.wobblePhase += dt * (this.isBossStunned(nowMs) ? 0.4 : 1.6);
     this.boss.x = this.centerX + Math.sin(this.boss.wobblePhase) * (28 + this.bossRound * 2);
     this.boss.y = this.canvas.height * 0.28 + Math.cos(this.boss.wobblePhase * 0.7) * 12;
@@ -2991,6 +2995,68 @@ class BeatParryGame {
     ctx.restore();
   }
 
+  drawBossEyes(ctx, boss, half, rotation, eyelidColor) {
+    const eyeSpacing = half * 0.32;
+    const eyeY = -half * 0.08;
+    const eyeHalf = half * 0.18;
+    const pupilHalf = eyeHalf * 0.38;
+    const maxPupil = eyeHalf - pupilHalf - 2;
+    const closeT = boss.eyeCloseT || 0;
+
+    const cosR = Math.cos(rotation);
+    const sinR = Math.sin(rotation);
+    const pdx = this.playerX - boss.x;
+    const pdy = this.playerY - boss.y;
+    const localPlayerX = pdx * cosR + pdy * sinR;
+    const localPlayerY = -pdx * sinR + pdy * cosR;
+
+    ctx.save();
+    ctx.translate(boss.x, boss.y);
+    ctx.rotate(rotation);
+
+    for (const side of [-1, 1]) {
+      const ex = side * eyeSpacing;
+      const ey = eyeY;
+
+      ctx.fillStyle = 'rgba(0,0,0,0.8)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(ex - eyeHalf, ey - eyeHalf, eyeHalf * 2, eyeHalf * 2);
+      ctx.strokeRect(ex - eyeHalf, ey - eyeHalf, eyeHalf * 2, eyeHalf * 2);
+
+      if (closeT < 0.85) {
+        const angle = Math.atan2(localPlayerY - ey, localPlayerX - ex);
+        const px = ex + Math.cos(angle) * maxPupil;
+        const py = ey + Math.sin(angle) * maxPupil;
+
+        ctx.fillStyle = this.hexToRgba(boss.color, 1);
+        ctx.fillRect(px - pupilHalf, py - pupilHalf, pupilHalf * 2, pupilHalf * 2);
+      }
+
+      if (closeT > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(ex - eyeHalf - 1, ey - eyeHalf - 1, eyeHalf * 2 + 2, eyeHalf * 2 + 2);
+        ctx.clip();
+        const lidBottom = ey - eyeHalf + closeT * eyeHalf * 2.2;
+        ctx.fillStyle = eyelidColor;
+        ctx.fillRect(ex - eyeHalf - 2, ey - eyeHalf - 2, eyeHalf * 2 + 4, lidBottom - (ey - eyeHalf - 2));
+        ctx.restore();
+      }
+
+      if (closeT >= 0.85) {
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(ex - eyeHalf * 0.85, ey);
+        ctx.lineTo(ex + eyeHalf * 0.85, ey);
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
+  }
+
   drawBossEntity(ctx) {
     if (!this.boss) return;
     const boss = this.boss;
@@ -3041,6 +3107,9 @@ class BeatParryGame {
       });
       ctx.globalAlpha = 1;
     }
+
+    const eyelidColor = stunned ? 'rgba(120,120,160,0.95)' : this.hexToRgba(boss.color, 0.95);
+    this.drawBossEyes(ctx, boss, half, rotation, eyelidColor);
 
     ctx.font = '700 14px Segoe UI, sans-serif';
     ctx.textAlign = 'center';
@@ -3099,6 +3168,9 @@ class BeatParryGame {
       ctx.fillText('STUNNED', boss.x, boss.y + 5);
       ctx.globalAlpha = 1;
     }
+
+    const cosmicEyelid = stunned ? 'rgba(90,70,140,0.95)' : 'rgba(16,0,43,0.95)';
+    this.drawBossEyes(ctx, boss, half, rotation, cosmicEyelid);
 
     ctx.font = '700 14px Segoe UI, sans-serif';
     ctx.textAlign = 'center';
