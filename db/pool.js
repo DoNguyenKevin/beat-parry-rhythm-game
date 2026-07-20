@@ -13,8 +13,8 @@ function getDatabaseUrl() {
 }
 
 function getDirectDatabaseUrl() {
-  if (process.env.DATABASE_URL_DIRECT) return process.env.DATABASE_URL_DIRECT;
   if (process.env.DATABASE_URL_UNPOOLED) return process.env.DATABASE_URL_UNPOOLED;
+  if (process.env.DATABASE_URL_DIRECT) return process.env.DATABASE_URL_DIRECT;
   return getDatabaseUrl().replace('-pooler', '');
 }
 
