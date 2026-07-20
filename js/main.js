@@ -178,9 +178,16 @@ function modeLabel(mode) {
 }
 
 function renderLoadoutBar() {
-  const equipped = Shop.equipped.filter((id) => Shop.getQuantity(id) > 0);
+  const electricSkin = Skins.getEquipped() === 'skin-electric';
+  const equipped = Shop.equipped.filter((id) => {
+    if (Shop.getQuantity(id) <= 0) return false;
+    if (electricSkin && (id === 'op-overdrive' || id === 'op-void-dash')) return false;
+    return true;
+  });
   if (!equipped.length) {
-    loadoutBar.innerHTML = '<span class="loadout-empty">No abilities equipped — visit Inventory</span>';
+    loadoutBar.innerHTML = electricSkin
+      ? '<span class="loadout-empty">Electric skin — Beam & Boom only (no Overdrive / Void Dash)</span>'
+      : '<span class="loadout-empty">No abilities equipped — visit Inventory</span>';
     return;
   }
   loadoutBar.innerHTML = equipped.map((id) => {
@@ -211,9 +218,14 @@ function buildShopList() {
     card.dataset.ability = item.id;
     const qty = Shop.getQuantity(item.id);
     const equipped = Shop.isEquipped(item.id);
-    const canEquip = Shop.canEquip(item.id);
+    const blockedByElectric = Skins.getEquipped() === 'skin-electric'
+      && (item.id === 'op-overdrive' || item.id === 'op-void-dash');
+    const canEquip = !blockedByElectric && Shop.canEquip(item.id);
     const modes = item.modes.map(modeLabel).join(', ');
     const qtyLabel = item.secret ? 'Permanent' : `×${qty}`;
+    const metaExtra = blockedByElectric
+      ? '<div class="meta shop-modes">Unavailable while Electric skin is equipped</div>'
+      : '';
 
     card.innerHTML = `
       <div class="shop-item-icon">${item.icon}</div>
@@ -221,12 +233,13 @@ function buildShopList() {
         <div class="name">${item.name}</div>
         <div class="meta">${item.description}</div>
         <div class="meta shop-modes">For: ${modes}</div>
+        ${metaExtra}
         <div class="shop-item-footer">
           <span class="shop-owned">Owned: <strong>${qtyLabel}</strong></span>
         </div>
       </div>
       <div class="shop-item-actions">
-        <button type="button" class="btn btn-secondary btn-small shop-equip-btn" ${canEquip ? '' : 'disabled'}>${equipped ? 'Equipped' : 'Equip'}</button>
+        <button type="button" class="btn btn-secondary btn-small shop-equip-btn" ${canEquip ? '' : 'disabled'}>${blockedByElectric ? 'Blocked' : equipped ? 'Equipped' : 'Equip'}</button>
       </div>
     `;
 
@@ -262,12 +275,17 @@ function buildSkinsList() {
     card.className = 'shop-item-card skin-item-card';
     if (skin.secret) card.classList.add('shop-item-secret');
     if (skin.spinOnly) card.classList.add('shop-item-spin-only');
+    if (skin.eventOnly) card.classList.add('shop-item-event');
     card.dataset.skin = skin.id;
     const previewStyle = skin.effect === 'cosmic'
       ? 'background: radial-gradient(circle at 30% 28%, #e8f4ff, #7b2cbf 35%, #3a0ca3 58%, #10002b 78%, #030109); box-shadow: 0 0 22px rgba(224, 64, 251, 0.55);'
       : skin.effect === 'fortune'
         ? 'background: radial-gradient(circle at 32% 26%, #fff8dc, #ffd700 32%, #ff9900 58%, #b8860b 78%, #3d2a00); box-shadow: 0 0 22px rgba(255, 215, 0, 0.55), inset 0 0 12px rgba(255, 248, 220, 0.35);'
-        : `background: radial-gradient(circle at 35% 35%, ${skin.colors?.accent || '#fff'}, ${skin.colors?.primary || '#ff6b9d'} 55%, ${skin.colors?.glow || '#ff6b9d'})`;
+        : skin.effect === 'juggernaut'
+          ? 'background: radial-gradient(circle at 32% 26%, #ffdd55, #ff5500 36%, #661111 68%, #1a0505); box-shadow: 0 0 22px rgba(255, 85, 0, 0.5), inset 0 0 14px rgba(255, 51, 0, 0.25);'
+          : skin.effect === 'electric'
+            ? 'background: radial-gradient(circle at 32% 26%, #e8f8ff, #44ddff 34%, #8866ff 62%, #0a1628 82%); box-shadow: 0 0 22px rgba(68, 221, 255, 0.55), inset 0 0 14px rgba(170, 102, 255, 0.25);'
+          : `background: radial-gradient(circle at 35% 35%, ${skin.colors?.accent || '#fff'}, ${skin.colors?.primary || '#ff6b9d'} 55%, ${skin.colors?.glow || '#ff6b9d'})`;
     card.innerHTML = `
       <div class="shop-item-icon skin-preview" style="${previewStyle}">${skin.icon}</div>
       <div class="shop-item-info">
@@ -293,7 +311,7 @@ function refreshSkinsUI() {
 async function equipSkin(skinId) {
   try {
     await Skins.equip(skinId);
-    refreshSkinsUI();
+    refreshShopUI();
   } catch (err) {
     alert(err.message);
   }
@@ -331,6 +349,8 @@ function toggleEquipAbility(abilityId) {
 function abilityKeyHint(id) {
   if (id === 'op-overdrive') return ' · SPACE';
   if (id === 'op-void-dash') return ' · V';
+  if (id === 'electric-beam') return ' · Hold Q';
+  if (id === 'electric-boom') return ' · E';
   return '';
 }
 
@@ -360,12 +380,20 @@ function showAbilityHud(abilities) {
       && (id === 'op-overdrive' || id === 'op-void-dash');
     const fortune = Skins.getEquipped() === 'skin-fortune-crown'
       && (id === 'op-overdrive' || id === 'op-void-dash');
-    const cls = cosmic
-      ? 'ability-chip ability-chip-cosmic'
-      : fortune
-        ? 'ability-chip ability-chip-fortune'
-        : 'ability-chip';
-    const suffix = cosmic ? ' ✦' : fortune ? ' 👑' : '';
+    const juggernaut = Skins.getEquipped() === 'skin-juggernaut'
+      && (id === 'op-overdrive' || id === 'op-void-dash');
+    const electric = (id === 'electric-beam' || id === 'electric-boom')
+      && Skins.getEquipped() === 'skin-electric';
+    const cls = juggernaut
+      ? 'ability-chip ability-chip-juggernaut'
+      : electric
+        ? 'ability-chip ability-chip-electric'
+      : cosmic
+        ? 'ability-chip ability-chip-cosmic'
+        : fortune
+          ? 'ability-chip ability-chip-fortune'
+          : 'ability-chip';
+    const suffix = juggernaut ? ' 🛡️' : electric ? ' ⚡' : cosmic ? ' ✦' : fortune ? ' 👑' : '';
     return `<span class="${cls}">${item?.icon || '✦'} ${item?.name || id}${hint}${suffix}</span>`;
   }).join('');
   abilityHud.classList.remove('hidden');
@@ -571,6 +599,46 @@ function buildBossList() {
   const mode = createBossMode();
   const weapon = getBossWeapon(Skins.getEquipped());
   const skin = Skins.getEquippedData();
+  const invasionChance = typeof getInvasionChancePercent === 'function' ? getInvasionChancePercent() : 0;
+  const invasionReady = typeof canTriggerInvasion === 'function' && canTriggerInvasion();
+  const ownsJuggernaut = Skins.owns('skin-juggernaut');
+  const ownsElectric = Skins.owns('skin-electric');
+  const raidReady = typeof canStartElectricRaid === 'function' && canStartElectricRaid();
+
+  const electricCard = document.createElement('button');
+  electricCard.type = 'button';
+  electricCard.className = 'training-mode-card electric-raid-card';
+  if (!raidReady) electricCard.classList.add('electric-raid-cleared');
+  electricCard.innerHTML = `
+    <div class="training-mode-icon electric-raid-icon">${ELECTRIC_RAID?.icon || '⚡'}</div>
+    <div class="training-mode-info">
+      <div class="name">${ELECTRIC_RAID?.name || 'Thunder Vault Raid'}</div>
+      <div class="meta">${ELECTRIC_RAID?.description || 'Insanely hard lightning colossus.'}</div>
+      <div class="meta">${ownsElectric ? '✓ Electric skin unlocked — equip it for Beam (Q) & Boom (E)' : 'Reward: Electric skin + both skills (below Juggernaut power)'}</div>
+    </div>
+    <span class="training-tag electric-raid-tag">${raidReady ? 'RAID' : 'CLEARED'}</span>
+  `;
+  electricCard.addEventListener('click', async () => {
+    if (!raidReady) return;
+    await showElectricRaidIntro();
+    startElectricRaid();
+  });
+  bossList.appendChild(electricCard);
+
+  const eventCard = document.createElement('div');
+  eventCard.className = 'juggernaut-event-info';
+  if (ownsJuggernaut) eventCard.classList.add('juggernaut-event-cleared');
+  eventCard.innerHTML = `
+    <div class="training-mode-icon juggernaut-event-icon">${JUGGERNAUT_EVENT?.icon || '☄️'}</div>
+    <div class="training-mode-info">
+      <div class="name">${JUGGERNAUT_EVENT?.name || 'Juggernaut Invasion'}</div>
+      <div class="meta">${JUGGERNAUT_EVENT?.description || 'Rare random boss ambush.'}</div>
+      <div class="meta">Equip <strong>Overdrive + Void Dash</strong> — then enter Boss Fight for a <strong>${invasionChance}%</strong> ambush chance${typeof hasOpSkinEquipped === 'function' && hasOpSkinEquipped() ? ' (boosted by OP skin)' : ''}</div>
+      <div class="meta">${ownsJuggernaut ? '✓ Juggernaut skin unlocked' : 'Reward: Juggernaut skin (Fortune-tier, below Void God)'}</div>
+    </div>
+    <span class="training-tag juggernaut-event-tag">${invasionReady ? `${invasionChance}%` : 'LOCKED'}</span>
+  `;
+  bossList.appendChild(eventCard);
 
   const card = document.createElement('button');
   card.type = 'button';
@@ -585,8 +653,178 @@ function buildBossList() {
     </div>
     <span class="training-tag boss-tag">Arena</span>
   `;
-  card.addEventListener('click', () => startBossMode(mode));
+  card.addEventListener('click', async () => {
+    if (typeof rollInvasion === 'function' && rollInvasion()) {
+      await showInvasionIntro();
+      startJuggernautEvent();
+      return;
+    }
+    startBossMode(mode);
+  });
   bossList.appendChild(card);
+}
+
+function showInvasionIntro() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'juggernaut-invasion-intro';
+    overlay.innerHTML = `
+      <div class="juggernaut-invasion-intro-inner">
+        <div class="juggernaut-invasion-intro-icon">☄️</div>
+        <div class="juggernaut-invasion-intro-title">JUGGERNAUT INVASION</div>
+        <div class="juggernaut-invasion-intro-sub">The titan has ambushed your arena!</div>
+      </div>
+    `;
+    document.getElementById('app').appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('active'));
+    setTimeout(() => {
+      overlay.classList.remove('active');
+      setTimeout(() => {
+        overlay.remove();
+        resolve();
+      }, 450);
+    }, 2400);
+  });
+}
+
+function showElectricRaidIntro() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'electric-raid-intro';
+    overlay.innerHTML = `
+      <div class="electric-raid-intro-inner">
+        <div class="electric-raid-intro-icon">⚡</div>
+        <div class="electric-raid-intro-title">THUNDER VAULT RAID</div>
+        <div class="electric-raid-intro-sub">Storm Colossus awaits — survive Hyperion Cascade!</div>
+      </div>
+    `;
+    document.getElementById('app').appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('active'));
+    setTimeout(() => {
+      overlay.classList.remove('active');
+      setTimeout(() => {
+        overlay.remove();
+        resolve();
+      }, 450);
+    }, 2400);
+  });
+}
+
+async function startElectricRaid() {
+  if (blockIfMaintenance()) return;
+  if (typeof canStartElectricRaid === 'function' && !canStartElectricRaid()) return;
+  await audioEngine.resume();
+  const song = typeof createElectricRaidSong === 'function' ? createElectricRaidSong() : createBossMode();
+  const abilities = await prepareRunAbilities('boss');
+  lastBossSong = song;
+
+  hideMenu();
+  results.classList.add('hidden');
+  results.classList.remove('active');
+  hud.classList.remove('hidden');
+  trainingBadge.classList.add('hidden');
+  nightmareBadge.classList.add('hidden');
+  dodgeBadge.classList.add('hidden');
+  bossBadge.classList.remove('hidden');
+  trainingLevelHud.classList.remove('hidden');
+  dodgeHealthHud.classList.remove('hidden');
+  const weapon = getBossWeapon(Skins.getEquipped());
+  updateDodgeHealthHud(BOSS_PLAYER_HEALTH, BOSS_PLAYER_HEALTH);
+  showAbilityHud(abilities);
+  bindAbilityHud(game);
+
+  songNameEl.textContent = `⚡ ${song.name} · ${weapon.name}`;
+  scoreEl.textContent = '0';
+  comboEl.textContent = '0';
+  progressFill.style.width = '0%';
+  scoreEl.parentElement.classList.remove('penalty');
+  trainingLevelHud.textContent = 'STORM COLOSSUS';
+
+  game.onScoreUpdate = ({ score, combo, rating, health, maxHealth, bossHealth, bossMaxHealth, bossSkill, minionCount }) => {
+    scoreEl.textContent = score.toLocaleString();
+    comboEl.textContent = combo;
+    const skillLabel = bossSkill ? ` · ${bossSkill}` : '';
+    const enemyLabel = minionCount ? ` · ${minionCount} enemies` : '';
+    trainingLevelHud.textContent = `STORM COLOSSUS${skillLabel}${enemyLabel}`;
+    if (health != null) updateDodgeHealthHud(health, maxHealth);
+    progressFill.style.width = bossMaxHealth > 0
+      ? `${((bossMaxHealth - (bossHealth ?? bossMaxHealth)) / bossMaxHealth) * 100}%`
+      : '0%';
+
+    if (rating === 'miss') {
+      flashOverlay.className = rating;
+      flashOverlay.style.opacity = '1';
+      setTimeout(() => { flashOverlay.style.opacity = '0'; }, 80);
+      showDodgeHitPopup();
+    }
+  };
+
+  game.onElectricRaidVictory = (data) => showResults(data, true);
+  game.onComplete = (data) => showResults(data, true);
+  game.onDodgeDefeat = (data) => showResults(data, true);
+  game.onTrainingExit = () => finishBoss();
+  game.onTrainingRestart = () => startElectricRaid();
+  game.start(song, { training: false, dodge: false, boss: true, electricRaidEvent: true, abilities, skinId: Skins.getEquipped() });
+}
+
+async function startJuggernautEvent() {
+  if (blockIfMaintenance()) return;
+  if (typeof canTriggerInvasion === 'function' && !canTriggerInvasion()) {
+    startBossMode(createBossMode());
+    return;
+  }
+  await audioEngine.resume();
+  const song = typeof createJuggernautSong === 'function' ? createJuggernautSong() : createBossMode();
+  const abilities = await prepareRunAbilities('boss');
+  lastBossSong = song;
+
+  hideMenu();
+  results.classList.add('hidden');
+  results.classList.remove('active');
+  hud.classList.remove('hidden');
+  trainingBadge.classList.add('hidden');
+  nightmareBadge.classList.add('hidden');
+  dodgeBadge.classList.add('hidden');
+  bossBadge.classList.remove('hidden');
+  trainingLevelHud.classList.remove('hidden');
+  dodgeHealthHud.classList.remove('hidden');
+  const weapon = getBossWeapon(Skins.getEquipped());
+  updateDodgeHealthHud(BOSS_PLAYER_HEALTH, BOSS_PLAYER_HEALTH);
+  showAbilityHud(abilities);
+  bindAbilityHud(game);
+
+  songNameEl.textContent = `☄️ ${song.name} · ${weapon.name}`;
+  scoreEl.textContent = '0';
+  comboEl.textContent = '0';
+  progressFill.style.width = '0%';
+  scoreEl.parentElement.classList.remove('penalty');
+  trainingLevelHud.textContent = 'THE JUGGERNAUT';
+
+  game.onScoreUpdate = ({ score, combo, rating, health, maxHealth, bossHealth, bossMaxHealth, bossSkill, minionCount }) => {
+    scoreEl.textContent = score.toLocaleString();
+    comboEl.textContent = combo;
+    const skillLabel = bossSkill ? ` · ${bossSkill}` : '';
+    const enemyLabel = minionCount ? ` · ${minionCount} enemies` : '';
+    trainingLevelHud.textContent = `JUGGERNAUT${skillLabel}${enemyLabel}`;
+    if (health != null) updateDodgeHealthHud(health, maxHealth);
+    progressFill.style.width = bossMaxHealth > 0
+      ? `${((bossMaxHealth - (bossHealth ?? bossMaxHealth)) / bossMaxHealth) * 100}%`
+      : '0%';
+
+    if (rating === 'miss') {
+      flashOverlay.className = rating;
+      flashOverlay.style.opacity = '1';
+      setTimeout(() => { flashOverlay.style.opacity = '0'; }, 80);
+      showDodgeHitPopup();
+    }
+  };
+
+  game.onJuggernautVictory = (data) => showResults(data, true);
+  game.onComplete = (data) => showResults(data, true);
+  game.onDodgeDefeat = (data) => showResults(data, true);
+  game.onTrainingExit = () => finishBoss();
+  game.onTrainingRestart = () => startJuggernautEvent();
+  game.start(song, { training: false, dodge: false, boss: true, juggernautEvent: true, abilities, skinId: Skins.getEquipped() });
 }
 
 function buildDodgeList() {
@@ -1046,10 +1284,14 @@ async function showResults(data, isTraining) {
   const levelWrap = document.getElementById('stat-level-wrap');
   const timeWrap = document.getElementById('stat-time-wrap');
 
-  titleEl.textContent = data.defeated
+  titleEl.textContent = data.electricRaidVictory
+    ? 'Storm Colossus Defeated!'
+    : data.juggernautVictory
+    ? 'Juggernaut Defeated!'
+    : data.defeated
     ? 'Defeated'
     : isTraining
-      ? (data.boss ? 'Boss Fight Complete' : data.dodge ? 'Dodge Complete' : 'Training Complete')
+      ? (data.electricRaidEvent ? 'Thunder Vault Raid' : data.juggernautEvent ? 'Juggernaut Invasion' : data.boss ? 'Boss Fight Complete' : data.dodge ? 'Dodge Complete' : 'Training Complete')
       : (data.nightmare ? 'Nightmare Complete' : 'Song Complete');
   gradeEl.style.display = isTraining ? 'none' : 'block';
   summaryLine.classList.toggle('hidden', !isTraining);
@@ -1057,8 +1299,16 @@ async function showResults(data, isTraining) {
   timeWrap.classList.toggle('hidden', !isTraining);
 
   if (isTraining) {
-    summaryLine.textContent = data.defeated
-      ? (data.boss
+    summaryLine.textContent = data.electricRaidVictory
+      ? 'You earned the Electric skin! Equip it and use Q (Beam) + E (Boom) in all modes.'
+      : data.juggernautVictory
+      ? 'You earned the Juggernaut skin! Equip it with Overdrive + Void Dash for Titan abilities.'
+      : data.defeated
+      ? (data.electricRaidEvent
+        ? 'Storm Colossus overwhelmed you — this raid is insanely hard. Try again!'
+        : data.juggernautEvent
+        ? 'The Juggernaut crushed you — try again with both OP skills equipped.'
+        : data.boss
         ? `Defeated on Round ${data.bossRound || data.trainingLevel} — ${data.stats.good || 0} hits landed`
         : `Health depleted at Level ${data.trainingLevel} — ${data.stats.excellent} dodged, ${data.stats.miss} hit`)
       : data.boss
@@ -1107,9 +1357,46 @@ async function showResults(data, isTraining) {
       timeSurvived: data.timeSurvived || 0,
       activeAbilities: data.activeAbilities || [],
       skinId,
+      juggernautVictory: !!data.juggernautVictory,
+      electricRaidVictory: !!data.electricRaidVictory,
     });
 
-    if (reward.earned > 0) {
+    if (reward.electricRaidUnlocked && typeof Skins !== 'undefined') {
+      Skins.setOwned(reward.ownedSkins || [...Skins.owned, 'skin-electric']);
+      if (typeof Shop !== 'undefined') {
+        if (reward.secretUnlocks) Shop.setSecretUnlocks(reward.secretUnlocks);
+        Shop.equipUnlockedSecrets(['electric-beam', 'electric-boom']);
+      }
+      buildSkinsList();
+      buildBossList();
+      refreshShopUI();
+    } else if (reward.juggernautUnlocked && typeof Skins !== 'undefined') {
+      Skins.setOwned(reward.ownedSkins || [...Skins.owned, 'skin-juggernaut']);
+      buildSkinsList();
+      buildBossList();
+    } else if (reward.ownedSkins && typeof Skins !== 'undefined') {
+      Skins.setOwned(reward.ownedSkins);
+    }
+
+    if (data.electricRaidVictory) {
+      let earnedText = reward.electricRaidUnlocked
+        ? '⚡ <strong>Electric skin unlocked!</strong> Beam & Boom skills ready — check Skins + Shop.'
+        : '⚡ Thunder Vault cleared!';
+      if (reward.earned > 0) {
+        earnedText += ` +${reward.earned.toLocaleString()} RUD`;
+      }
+      rudEarnedEl.innerHTML = earnedText;
+      rudEarnedEl.classList.remove('hidden');
+    } else if (data.juggernautVictory) {
+      let earnedText = reward.juggernautUnlocked
+        ? '🛡️ <strong>Juggernaut skin unlocked!</strong> Check the Skins tab.'
+        : '🛡️ Juggernaut victory!';
+      if (reward.earned > 0) {
+        earnedText += ` +${reward.earned.toLocaleString()} RUD`;
+      }
+      rudEarnedEl.innerHTML = earnedText;
+      rudEarnedEl.classList.remove('hidden');
+    } else if (reward.earned > 0) {
       updateRudDisplay(true);
 
       let earnedText = `+${reward.earned.toLocaleString()} RUD earned`;
@@ -1156,7 +1443,9 @@ async function showResults(data, isTraining) {
 
   retryBtn.classList.toggle('hidden', !isTraining);
   retryBtn.onclick = () => {
-    if (data.boss && lastBossSong) startBossMode(lastBossSong);
+    if (data.electricRaidEvent && lastBossSong?.electricRaid) startElectricRaid();
+    else if (data.juggernautEvent && lastBossSong?.juggernaut) startJuggernautEvent();
+    else if (data.boss && lastBossSong) startBossMode(lastBossSong);
     else if (data.dodge && lastDodgeSong) startDodgeMode(lastDodgeSong);
     else if (lastTrainingSong) startSong(lastTrainingSong, true);
     else if (data.nightmare && lastNightmareSong) startSong(lastNightmareSong, false, { nightmare: true });

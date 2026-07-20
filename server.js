@@ -25,6 +25,8 @@ const SHOP_ITEMS = {
   'long-warning': { price: 140, modes: ['dodge', 'boss'] },
   'op-overdrive': { price: 0, modes: ['play', 'training', 'dodge', 'boss'], secret: true },
   'op-void-dash': { price: 0, modes: ['play', 'training', 'dodge', 'boss'], secret: true },
+  'electric-beam': { price: 0, modes: ['play', 'training', 'dodge', 'boss'], secret: true },
+  'electric-boom': { price: 0, modes: ['play', 'training', 'dodge', 'boss'], secret: true },
 };
 
 const SECRET_CODES = {
@@ -72,11 +74,36 @@ const SKINS = {
       dodgeHealthBonus: 30,
     },
   },
+  'skin-juggernaut': {
+    price: 0,
+    eventOnly: true,
+    passives: {
+      scoreMult: 1.23,
+      rudMult: 1.18,
+      windowMult: 1.13,
+      comboCapBonus: 14,
+      dodgeHealthBonus: 38,
+    },
+  },
+  'skin-electric': {
+    price: 0,
+    eventOnly: true,
+    passives: {
+      scoreMult: 1.14,
+      rudMult: 1.1,
+      windowMult: 1.07,
+      comboCapBonus: 8,
+      dodgeHealthBonus: 22,
+    },
+  },
 };
 
 const DEFAULT_SKIN_ID = 'default';
 const OVERDRIVE_ID = 'op-overdrive';
 const OVERDRIVE_BONUS_ID = 'op-void-dash';
+const ELECTRIC_BEAM_ID = 'electric-beam';
+const ELECTRIC_BOOM_ID = 'electric-boom';
+const ELECTRIC_SKIN_ID = 'skin-electric';
 const VOID_GOD_SKIN_ID = 'skin-void-god';
 
 const WHEEL_SPIN_COST = 150;
@@ -350,6 +377,12 @@ async function hasSecretUnlock(userId, unlockId) {
   if (!(await isSecretEligibleUserId(userId))) return false;
   if (unlockId === OVERDRIVE_BONUS_ID && (await hasSecretUnlock(userId, OVERDRIVE_ID))) {
     return true;
+  }
+  if (unlockId === ELECTRIC_BOOM_ID && (await hasSecretUnlock(userId, ELECTRIC_BEAM_ID))) {
+    return true;
+  }
+  if (unlockId === ELECTRIC_BEAM_ID || unlockId === ELECTRIC_BOOM_ID) {
+    if (await ownsSkin(userId, ELECTRIC_SKIN_ID)) return true;
   }
   return db.hasRedeemedCode(userId, unlockId);
 }
@@ -1008,6 +1041,8 @@ app.post('/api/users/:id/complete', requireAuth, async (req, res, next) => {
       timeSurvived = 0,
       activeAbilities = [],
       skinId = DEFAULT_SKIN_ID,
+      juggernautVictory = false,
+      electricRaidVictory = false,
     } = req.body;
 
     const isNightmareRun = !!isNightmare || (songId && String(songId).startsWith('nightmare-'));
@@ -1037,6 +1072,8 @@ app.post('/api/users/:id/complete', requireAuth, async (req, res, next) => {
     }
 
     let balance = user.rud_balance;
+    let juggernautUnlocked = false;
+    let electricRaidUnlocked = false;
     if (earned > 0) {
       balance = await db.withTransaction(async (client) => {
         if (reward.isNewBest && reward.songId) {
@@ -1048,6 +1085,34 @@ app.post('/api/users/:id/complete', requireAuth, async (req, res, next) => {
       await db.upsertBestScore(userId, reward.songId, reward.score);
     }
 
+    if (juggernautVictory) {
+      const alreadyOwned = await ownsSkin(userId, 'skin-juggernaut');
+      if (!alreadyOwned) {
+        await db.addOwnedSkin(userId, 'skin-juggernaut');
+        juggernautUnlocked = true;
+      }
+      const bonusRud = 3500;
+      earned += bonusRud;
+      balance = await db.creditBalance(userId, bonusRud);
+    }
+
+    if (electricRaidVictory) {
+      const alreadyOwned = await ownsSkin(userId, ELECTRIC_SKIN_ID);
+      if (!alreadyOwned) {
+        await db.addOwnedSkin(userId, ELECTRIC_SKIN_ID);
+        electricRaidUnlocked = true;
+      }
+      if (!(await db.hasRedeemedCode(userId, ELECTRIC_BEAM_ID))) {
+        await db.insertRedeemedCode(userId, 'electric-raid', ELECTRIC_BEAM_ID);
+      }
+      if (!(await db.hasRedeemedCode(userId, ELECTRIC_BOOM_ID))) {
+        await db.insertRedeemedCode(userId, 'electric-raid', ELECTRIC_BOOM_ID);
+      }
+      const bonusRud = 5000;
+      earned += bonusRud;
+      balance = await db.creditBalance(userId, bonusRud);
+    }
+
     res.json({
       earned,
       base: reward.base,
@@ -1056,6 +1121,10 @@ app.post('/api/users/:id/complete', requireAuth, async (req, res, next) => {
       balance,
       bestScores: await db.getBestScores(userId),
       inventory: await db.getInventory(userId),
+      ownedSkins: await getOwnedSkins(userId),
+      secretUnlocks: await getRedeemedSecrets(userId),
+      juggernautUnlocked,
+      electricRaidUnlocked,
     });
   } catch (err) {
     next(err);

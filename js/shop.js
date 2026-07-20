@@ -81,6 +81,26 @@ const SHOP_ITEMS = {
     modes: ['play', 'training', 'dodge', 'boss'],
     icon: '🌀',
   },
+  'electric-beam': {
+    id: 'electric-beam',
+    name: 'Electric Beam',
+    description: 'Hold Q — Boss: continuous lightning beam. Play: +35% parry score while held. Dodge: stun field while held. Exclusive to Electric skin (replaces Overdrive / Void Dash).',
+    price: 0,
+    secret: true,
+    electric: true,
+    modes: ['play', 'training', 'dodge', 'boss'],
+    icon: '🔷',
+  },
+  'electric-boom': {
+    id: 'electric-boom',
+    name: 'Electric Boom',
+    description: 'Press E — Dodge/Boss: +damage & speed surge. Play: electric blink skip (like Void Dash).',
+    price: 0,
+    secret: true,
+    electric: true,
+    modes: ['play', 'training', 'dodge', 'boss'],
+    icon: '💠',
+  },
 };
 
 const SECRET_CODES = {
@@ -89,15 +109,23 @@ const SECRET_CODES = {
 
 const OVERDRIVE_ID = 'op-overdrive';
 const OVERDRIVE_BONUS_ID = 'op-void-dash';
+const ELECTRIC_BEAM_ID = 'electric-beam';
+const ELECTRIC_BOOM_ID = 'electric-boom';
+const ELECTRIC_SKIN_ID = 'skin-electric';
 
 function expandSecretUnlocks(ids) {
   const set = new Set(Array.isArray(ids) ? ids : []);
   if (set.has(OVERDRIVE_ID)) set.add(OVERDRIVE_BONUS_ID);
+  if (set.has(ELECTRIC_BEAM_ID)) set.add(ELECTRIC_BOOM_ID);
   return [...set];
 }
 
 function expandRunAbilities(abilities) {
-  return Array.isArray(abilities) ? [...abilities] : [];
+  const list = Array.isArray(abilities) ? [...abilities] : [];
+  if (typeof Skins !== 'undefined' && Skins.getEquipped() === ELECTRIC_SKIN_ID) {
+    return list.filter((id) => id !== OVERDRIVE_ID && id !== OVERDRIVE_BONUS_ID);
+  }
+  return list;
 }
 
 const UNLOCK_KEY = 'beatParrySecretUnlocks';
@@ -141,6 +169,14 @@ const Shop = {
 
   isSecretUnlocked(abilityId) {
     if (abilityId === OVERDRIVE_BONUS_ID && this.secretUnlocks.includes(OVERDRIVE_ID)) return true;
+    if (abilityId === ELECTRIC_BOOM_ID && this.secretUnlocks.includes(ELECTRIC_BEAM_ID)) return true;
+    if (
+      (abilityId === ELECTRIC_BEAM_ID || abilityId === ELECTRIC_BOOM_ID)
+      && typeof Skins !== 'undefined'
+      && Skins.owns(ELECTRIC_SKIN_ID)
+    ) {
+      return true;
+    }
     return this.secretUnlocks.includes(abilityId);
   },
 
@@ -165,11 +201,34 @@ const Shop = {
   ensureSecretLoadout() {
     const secrets = [OVERDRIVE_ID, OVERDRIVE_BONUS_ID];
     const unlocked = secrets.filter((id) => this.isSecretUnlocked(id));
-    if (!unlocked.length) return;
+    if (!unlocked.length) {
+      this.ensureElectricLoadout();
+      return;
+    }
 
     const hasAnyEquipped = unlocked.some((id) => this.equipped.includes(id));
-    if (!hasAnyEquipped) return;
+    if (!hasAnyEquipped) {
+      this.ensureElectricLoadout();
+      return;
+    }
 
+    let changed = false;
+    for (const id of unlocked) {
+      if (!this.equipped.includes(id)) {
+        this.equipped.push(id);
+        changed = true;
+      }
+    }
+    if (changed) this.saveLoadout();
+    this.ensureElectricLoadout();
+  },
+
+  ensureElectricLoadout() {
+    const electric = [ELECTRIC_BEAM_ID, ELECTRIC_BOOM_ID];
+    const unlocked = electric.filter((id) => this.isSecretUnlocked(id));
+    if (!unlocked.length) return;
+    const hasAny = unlocked.some((id) => this.equipped.includes(id));
+    if (!hasAny) return;
     let changed = false;
     for (const id of unlocked) {
       if (!this.equipped.includes(id)) {
@@ -243,7 +302,15 @@ const Shop = {
   getEquippedForMode(mode) {
     return this.equipped.filter((id) => {
       const item = SHOP_ITEMS[id];
-      return item && item.modes.includes(mode) && this.getQuantity(id) > 0;
+      if (!item || !item.modes.includes(mode) || this.getQuantity(id) <= 0) return false;
+      if (
+        typeof Skins !== 'undefined'
+        && Skins.getEquipped() === ELECTRIC_SKIN_ID
+        && (id === OVERDRIVE_ID || id === OVERDRIVE_BONUS_ID)
+      ) {
+        return false;
+      }
+      return true;
     });
   },
 

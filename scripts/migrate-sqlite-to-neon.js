@@ -71,7 +71,16 @@ async function importTable(client, tableName, rows, columns, idColumn = 'id') {
   const sql = `INSERT INTO ${tableName} (${colList}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`;
 
   for (const row of rows) {
-    const values = columns.map((col) => row[col]);
+    const values = columns.map((col) => {
+      const value = row[col];
+      if (col === 'rud_balance' && value != null) {
+        const n = Number(value);
+        if (Number.isFinite(n)) {
+          return Math.min(Math.max(Math.trunc(n), -2147483648), 2147483647);
+        }
+      }
+      return value;
+    });
     await client.query(sql, values);
   }
 
@@ -108,7 +117,10 @@ async function main() {
   const adapter = await openSqliteDatabase(sqlitePath);
 
   try {
-    const users = queryAll(adapter, 'SELECT id, username, password_hash, rud_balance, equipped_skin, created_at FROM users');
+    const users = queryAll(
+      adapter,
+      'SELECT id, username, password_hash, rud_balance, equipped_skin, created_at, last_free_spin_at, wheel_bonus_spins FROM users'
+    );
     const duplicate = findCaseDuplicateUsernames(users);
     if (duplicate) {
       console.error(
@@ -126,7 +138,16 @@ async function main() {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await importTable(client, 'users', users, ['id', 'username', 'password_hash', 'rud_balance', 'equipped_skin', 'created_at']);
+      await importTable(client, 'users', users, [
+        'id',
+        'username',
+        'password_hash',
+        'rud_balance',
+        'equipped_skin',
+        'created_at',
+        'last_free_spin_at',
+        'wheel_bonus_spins',
+      ]);
       await importTable(client, 'user_sessions', sessions, ['token', 'user_id', 'expires_at', 'created_at'], null);
       await importTable(client, 'best_scores', scores, ['user_id', 'song_id', 'score', 'updated_at'], null);
       await importTable(client, 'user_inventory', inventory, ['user_id', 'ability_id', 'quantity'], null);

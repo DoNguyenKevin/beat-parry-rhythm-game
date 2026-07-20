@@ -59,6 +59,11 @@ class BeatParryGame {
     this._skinTrailTick = 0;
     this.cosmicOrbitals = [];
     this.fortuneOrbitals = [];
+    this.juggernautOrbitals = [];
+    this.juggernautEvent = false;
+    this.electricRaidEvent = false;
+    this.electricOrbitals = [];
+    this.electricBeamFx = null;
     this.overdriveWave = null;
     this.overdriveWave2 = null;
     this.overdriveFortuneFx = null;
@@ -90,6 +95,8 @@ class BeatParryGame {
     };
     window.addEventListener('resize', () => this.resize());
     window.addEventListener('keydown', (e) => this.handleKeyDown(e));
+    window.addEventListener('keyup', (e) => this.handleKeyUp(e));
+    window.addEventListener('blur', () => this.stopElectricBeamHold());
     window.addEventListener('pointermove', this._onPointerMove);
     this.beginRenderLoop();
   }
@@ -145,6 +152,11 @@ class BeatParryGame {
       slowStartUntilMs: 0,
       ghostPhaseUsed: false,
       lastOverdriveMs: 0,
+      lastElectricBeamMs: 0,
+      lastElectricBoomMs: 0,
+      electricBoomUntilMs: 0,
+      electricParryBoost: false,
+      electricBeamHolding: false,
     };
     this.overdriveWave = null;
     this.overdriveWave2 = null;
@@ -163,8 +175,10 @@ class BeatParryGame {
     this.bossStunnedUntilMs = 0;
     this.bossRoundCleared = false;
     this.bossClearUntilMs = 0;
+    this.juggernautEvent = false;
+    this.electricRaidEvent = false;
+    this.electricBeamFx = null;
     this.playerNextFireMs = 0;
-    this.skinTrail = [];
     this._skinTrailTick = 0;
   }
 
@@ -193,8 +207,17 @@ class BeatParryGame {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = this.canvas.width / rect.width;
     const scaleY = this.canvas.height / rect.height;
-    this.playerX = (clientX - rect.left) * scaleX;
-    this.playerY = (clientY - rect.top) * scaleY;
+    const targetX = (clientX - rect.left) * scaleX;
+    const targetY = (clientY - rect.top) * scaleY;
+    const boomActive = this.isElectricBoomActive();
+    if (boomActive && (this.playMode === 'dodge' || this.playMode === 'boss')) {
+      const snap = 0.42;
+      this.playerX += (targetX - this.playerX) * snap;
+      this.playerY += (targetY - this.playerY) * snap;
+    } else {
+      this.playerX = targetX;
+      this.playerY = targetY;
+    }
   }
 
   handlePointerMove(e) {
@@ -226,16 +249,27 @@ class BeatParryGame {
     this.skinPassives = this.activeSkin.passives || {};
     this.initCosmicOrbitals();
     this.initFortuneOrbitals();
+    this.initJuggernautOrbitals();
+    this.initElectricOrbitals();
     if (isDodge) {
       this.dodgeMaxHealth = DODGE_MAX_HEALTH + (this.skinPassives.dodgeHealthBonus || 0);
       this.dodgeHealth = this.dodgeMaxHealth;
     }
     if (isBoss) {
-      this.dodgeMaxHealth = BOSS_PLAYER_HEALTH + (this.skinPassives.dodgeHealthBonus || 0);
+      const bossHpBonus = this.skinPassives.dodgeHealthBonus || 0;
+      this.dodgeMaxHealth = BOSS_PLAYER_HEALTH + bossHpBonus;
       this.dodgeHealth = this.dodgeMaxHealth;
       this.bossWeapon = getBossWeapon(this.activeSkin?.id || DEFAULT_SKIN_ID);
       this.bossRound = 1;
-      this.initBossRound(1);
+      this.juggernautEvent = !!options.juggernautEvent;
+      this.electricRaidEvent = !!options.electricRaidEvent;
+      if (this.electricRaidEvent) {
+        this.initElectricRaidBoss();
+      } else if (this.juggernautEvent) {
+        this.initJuggernautBoss();
+      } else {
+        this.initBossRound(1);
+      }
     }
     if (this.activeAbilities.includes('slow-start') && isTraining) {
       this.abilityState.slowStartUntilMs = performance.now() + 45000;
@@ -273,6 +307,7 @@ class BeatParryGame {
   }
 
   stop() {
+    this.stopElectricBeamHold();
     this.state = 'idle';
     this.canvas.classList.remove('dodge-cursor');
     delete this.canvas.dataset.playMode;
@@ -423,12 +458,16 @@ class BeatParryGame {
   }
 
   hasAbility(id) {
+    if ((id === 'op-overdrive' || id === 'op-void-dash') && this.isElectricSkin()) {
+      return false;
+    }
     return this.activeAbilities.includes(id);
   }
 
   consumeActiveAbility(id) {
     if (!this.hasAbility(id)) return false;
     if (id === 'op-overdrive' || id === 'op-void-dash') return false;
+    if (id === 'electric-beam' || id === 'electric-boom') return false;
     const item = typeof Shop !== 'undefined' ? Shop.getItem(id) : null;
     if (item?.secret) return false;
     this.activeAbilities = this.activeAbilities.filter((abilityId) => abilityId !== id);
@@ -515,6 +554,10 @@ class BeatParryGame {
       boss: this.playMode === 'boss',
       bossRound: this.bossRound,
       defeated: this.dodgeHealth <= 0,
+      juggernautEvent: !!this.juggernautEvent,
+      juggernautVictory: false,
+      electricRaidEvent: !!this.electricRaidEvent,
+      electricRaidVictory: false,
       health: this.dodgeHealth,
       maxHealth: this.dodgeMaxHealth,
       trainingLevel: this.trainingLevel,
@@ -601,9 +644,35 @@ class BeatParryGame {
       }
 
       if (bullet.state === 'firing') {
+        const stunned = bullet.electricStunUntil && nowMs < bullet.electricStunUntil;
+        if (bullet.electricExplodeAt && nowMs >= bullet.electricExplodeAt && !bullet.electricExploded) {
+          bullet.electricExploded = true;
+          bullet.state = 'done';
+          this.stats.excellent++;
+          this.combo++;
+          this.score += 45 + level * 4;
+          for (let i = 0; i < 8; i++) {
+            const a = Math.random() * Math.PI * 2;
+            this.particles.push({
+              x: bullet.x,
+              y: bullet.y,
+              vx: Math.cos(a) * (100 + Math.random() * 140),
+              vy: Math.sin(a) * (100 + Math.random() * 140),
+              life: 1,
+              color: ['#44ddff', '#aa66ff'][i % 2],
+              size: 3 + Math.random() * 3,
+            });
+          }
+          this.notifyDodgeScoreUpdate();
+          continue;
+        }
         const prevX = bullet.x;
         const prevY = bullet.y;
-        const move = bullet.speed * dt;
+        const move = stunned ? bullet.speed * dt * 0.08 : bullet.speed * dt * (this.isElectricBoomActive(nowMs) ? 0.82 : 1);
+        if (stunned && bullet.electricShake) {
+          bullet.x += Math.cos(nowMs / 40 + bullet.angle) * 2.2;
+          bullet.y += Math.sin(nowMs / 35 + bullet.angle) * 2.2;
+        }
         bullet.x += Math.cos(bullet.angle) * move;
         bullet.y += Math.sin(bullet.angle) * move;
         bullet.traveled = (bullet.traveled || 0) + move;
@@ -715,6 +784,66 @@ class BeatParryGame {
     if (this.onDodgeDefeat) this.onDodgeDefeat(data);
   }
 
+  handleJuggernautVictory(nowMs = performance.now()) {
+    if (this.state !== 'playing' || !this.juggernautEvent) return;
+    this.bossRoundCleared = true;
+    this.score += 5000 + Math.floor(this.boss?.maxHealth || 0) * 0.5;
+    this.stats.excellent += 5;
+    this.screenShake = 28;
+    audioEngine.playParrySound('excellent');
+    for (let i = 0; i < 64; i++) {
+      const angle = (Math.PI * 2 * i) / 64;
+      const speed = 200 + Math.random() * 320;
+      this.particles.push({
+        x: this.boss?.x || this.centerX,
+        y: this.boss?.y || this.centerY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        color: ['#ff4500', '#ffd700', '#ff2200', '#ffffff'][i % 4],
+        size: 4 + Math.random() * 7,
+      });
+    }
+    const data = this.getTrainingSummary();
+    data.defeated = false;
+    data.juggernautVictory = true;
+    data.juggernautEvent = true;
+    this.state = 'complete';
+    this.stop();
+    if (this.onJuggernautVictory) this.onJuggernautVictory(data);
+    else if (this.onComplete) this.onComplete(data);
+  }
+
+  handleElectricRaidVictory(nowMs = performance.now()) {
+    if (this.state !== 'playing' || !this.electricRaidEvent) return;
+    this.bossRoundCleared = true;
+    this.score += 6500 + Math.floor(this.boss?.maxHealth || 0) * 0.4;
+    this.stats.excellent += 8;
+    this.screenShake = 32;
+    audioEngine.playParrySound('excellent');
+    for (let i = 0; i < 72; i++) {
+      const angle = (Math.PI * 2 * i) / 72;
+      const speed = 220 + Math.random() * 340;
+      this.particles.push({
+        x: this.boss?.x || this.centerX,
+        y: this.boss?.y || this.centerY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        color: ['#44ddff', '#aa66ff', '#e8f8ff', '#ffffff'][i % 4],
+        size: 4 + Math.random() * 7,
+      });
+    }
+    const data = this.getTrainingSummary();
+    data.defeated = false;
+    data.electricRaidVictory = true;
+    data.electricRaidEvent = true;
+    this.state = 'complete';
+    this.stop();
+    if (this.onElectricRaidVictory) this.onElectricRaidVictory(data);
+    else if (this.onComplete) this.onComplete(data);
+  }
+
   handleDodgeDefeat() {
     if (this.state !== 'playing' || this.playMode !== 'dodge') return;
     const data = this.getTrainingSummary();
@@ -751,6 +880,20 @@ class BeatParryGame {
       if (this.hasAbility('op-void-dash')) {
         e.preventDefault();
         this.triggerVoidDash();
+      }
+      return;
+    }
+    if (key === 'q') {
+      if (this.hasElectricSkill('electric-beam')) {
+        e.preventDefault();
+        if (!e.repeat) this.startElectricBeamHold();
+      }
+      return;
+    }
+    if (key === 'e') {
+      if (this.hasElectricSkill('electric-boom')) {
+        e.preventDefault();
+        this.triggerElectricBoom();
       }
       return;
     }
@@ -799,6 +942,14 @@ class BeatParryGame {
     this.registerHit(rating, bestNote, side, lane);
   }
 
+  handleKeyUp(e) {
+    if (this.state !== 'playing') return;
+    const key = e.key.toLowerCase();
+    if (key === 'q') {
+      this.stopElectricBeamHold();
+    }
+  }
+
   triggerOverdrive() {
     if (!this.hasAbility('op-overdrive')) return;
     const now = performance.now();
@@ -808,14 +959,15 @@ class BeatParryGame {
     const fx = this.getSpecialSkinFx();
     const cosmic = fx === 'cosmic';
     const fortune = fx === 'fortune';
+    const juggernaut = fx === 'juggernaut';
     this.abilityState.lastOverdriveMs = now;
 
     const cx = this.playMode === 'dodge' || this.playMode === 'boss' ? this.playerX : this.centerX;
     const cy = this.playMode === 'dodge' || this.playMode === 'boss' ? this.playerY : this.centerY;
-    const maxR = Math.max(this.canvas.width, this.canvas.height) * (cosmic ? 0.62 : fortune ? 0.58 : 0.55);
-    const durationMs = cosmic ? 900 : fortune ? 820 : 550;
+    const maxR = Math.max(this.canvas.width, this.canvas.height) * (cosmic ? 0.62 : fortune ? 0.58 : juggernaut ? 0.59 : 0.55);
+    const durationMs = cosmic ? 900 : fortune ? 820 : juggernaut ? 800 : 550;
 
-    this.overdriveWave = { startMs: now, durationMs, maxRadius: maxR, cx, cy, cosmic, fortune };
+    this.overdriveWave = { startMs: now, durationMs, maxRadius: maxR, cx, cy, cosmic, fortune, juggernaut };
     if (cosmic) {
       this.overdriveWave2 = {
         startMs: now + 140,
@@ -838,20 +990,34 @@ class BeatParryGame {
         fortune: true,
       };
       this.spawnFortuneOverdrive(cx, cy, maxR, now);
+    } else if (juggernaut) {
+      this.overdriveWave2 = {
+        startMs: now + 100,
+        durationMs: 760,
+        maxRadius: maxR * 0.75,
+        cx,
+        cy,
+        cosmic: false,
+        fortune: false,
+        juggernaut: true,
+      };
+      this.overdriveFortuneFx = null;
     } else {
       this.overdriveWave2 = null;
       this.overdriveFortuneFx = null;
     }
 
-    this.screenShake = cosmic ? 22 : fortune ? 18 : 14;
+    this.screenShake = cosmic ? 22 : fortune ? 18 : juggernaut ? 17 : 14;
     audioEngine.playParrySound('excellent');
 
     const burstColors = cosmic
       ? ['#e040fb', '#40c4ff', '#b8f0ff', '#7b2cbf', '#ffffff']
-      : fortune
-        ? ['#ffd700', '#ffec8b', '#ff9900', '#fff8dc', '#daa520']
-        : ['#ffd700', '#ffee88', '#ffffff'];
-    const burstCount = cosmic ? 48 : fortune ? 42 : 28;
+      : juggernaut
+        ? ['#ff4500', '#ffd700', '#ff2200', '#ff8800', '#ffffff']
+        : fortune
+          ? ['#ffd700', '#ffec8b', '#ff9900', '#fff8dc', '#daa520']
+          : ['#ffd700', '#ffee88', '#ffffff'];
+    const burstCount = cosmic ? 48 : fortune ? 42 : juggernaut ? 40 : 28;
 
     if (this.playMode === 'dodge' || this.playMode === 'boss') {
       let cleared = 0;
@@ -872,20 +1038,23 @@ class BeatParryGame {
       }
       if (this.playMode === 'boss' && this.boss) {
         this.stunBoss(BOSS_STUN_MS, now);
-        const shockDamage = Math.floor(this.boss.maxHealth * (cosmic ? 0.18 : fortune ? 0.14 : 0.1));
+        const shockDamage = Math.floor(this.boss.maxHealth * (cosmic ? 0.18 : fortune ? 0.14 : juggernaut ? 0.13 : 0.1));
         this.damageBoss(shockDamage, now);
+      }
+      if (juggernaut && (this.playMode === 'dodge' || this.playMode === 'boss')) {
+        this.dodgeHealth = Math.min(this.dodgeMaxHealth, this.dodgeHealth + Math.floor(this.dodgeMaxHealth * 0.1));
       }
       if (cleared > 0) {
         this.stats.excellent += cleared;
         this.combo += cleared;
         this.maxCombo = Math.max(this.maxCombo, this.combo);
       }
-      if (cosmic || fortune || this.playMode === 'boss') {
-        this.dodgeInvincibleUntilMs = now + (cosmic ? 900 : fortune ? 780 : 700);
+      if (cosmic || fortune || juggernaut || this.playMode === 'boss') {
+        this.dodgeInvincibleUntilMs = now + (cosmic ? 900 : fortune ? 780 : juggernaut ? 760 : 700);
       }
       for (let i = 0; i < burstCount; i++) {
         const angle = (Math.PI * 2 * i) / burstCount + Math.random() * 0.4;
-        const speed = (cosmic ? 220 : fortune ? 200 : 180) + Math.random() * (cosmic ? 280 : fortune ? 240 : 220);
+        const speed = (cosmic ? 220 : juggernaut ? 240 : fortune ? 200 : 180) + Math.random() * (cosmic ? 280 : juggernaut ? 300 : fortune ? 240 : 220);
         this.particles.push({
           x: cx,
           y: cy,
@@ -893,7 +1062,7 @@ class BeatParryGame {
           vy: Math.sin(angle) * speed,
           life: 1,
           color: burstColors[i % burstColors.length],
-          size: cosmic ? 4 + Math.random() * 6 : fortune ? 3 + Math.random() * 5 : 5 + Math.random() * 5,
+          size: cosmic ? 4 + Math.random() * 6 : juggernaut ? 5 + Math.random() * 6 : fortune ? 3 + Math.random() * 5 : 5 + Math.random() * 5,
         });
       }
       if (this.onScoreUpdate) {
@@ -1021,7 +1190,8 @@ class BeatParryGame {
     const fx = this.getSpecialSkinFx();
     const cosmic = fx === 'cosmic';
     const fortune = fx === 'fortune';
-    const DASH_MS = cosmic ? 460 : fortune ? 420 : 380;
+    const juggernaut = fx === 'juggernaut';
+    const DASH_MS = cosmic ? 460 : juggernaut ? 480 : fortune ? 420 : 380;
 
     if (this.playMode === 'dodge' || this.playMode === 'boss') {
       const margin = this.ballRadius + 28;
@@ -1031,6 +1201,9 @@ class BeatParryGame {
       this.playerY = margin + Math.random() * (this.canvas.height - margin * 2);
       this.voidDashUntilMs = now + DASH_MS;
       this.dodgeInvincibleUntilMs = now + DASH_MS;
+      if (juggernaut) {
+        this.dodgeHealth = Math.min(this.dodgeMaxHealth, this.dodgeHealth + Math.floor(this.dodgeMaxHealth * 0.04));
+      }
       this.voidDashEffect = {
         fromX,
         fromY,
@@ -1040,20 +1213,23 @@ class BeatParryGame {
         durationMs: DASH_MS,
         cosmic,
         fortune,
+        juggernaut,
       };
-      this.screenShake = cosmic ? 8 : fortune ? 7 : 5;
-      audioEngine.playParrySound(cosmic || fortune ? 'excellent' : 'good');
+      this.screenShake = cosmic ? 8 : juggernaut ? 10 : fortune ? 7 : 5;
+      audioEngine.playParrySound(cosmic || juggernaut || fortune ? 'excellent' : 'good');
 
       const burstColors = cosmic
         ? ['#e8f4ff', '#b8f0ff', '#e040fb', '#40c4ff', '#ffffff']
-        : fortune
-          ? ['#ffd700', '#ffec8b', '#fff8dc', '#ff9900', '#f0c040']
-          : ['#aa66ff'];
-      const burstCount = cosmic ? 36 : fortune ? 32 : 20;
+        : juggernaut
+          ? ['#ff4500', '#ffd700', '#ff2200', '#ff8800', '#ffffff']
+          : fortune
+            ? ['#ffd700', '#ffec8b', '#fff8dc', '#ff9900', '#f0c040']
+            : ['#aa66ff'];
+      const burstCount = cosmic ? 36 : juggernaut ? 38 : fortune ? 32 : 20;
       for (let i = 0; i < burstCount; i++) {
         const t = i / burstCount;
         const angle = Math.random() * Math.PI * 2;
-        const speed = cosmic ? 140 + Math.random() * 200 : fortune ? 130 + Math.random() * 180 : 120 + Math.random() * 160;
+        const speed = cosmic ? 140 + Math.random() * 200 : juggernaut ? 150 + Math.random() * 210 : fortune ? 130 + Math.random() * 180 : 120 + Math.random() * 160;
         this.particles.push({
           x: fromX + (this.playerX - fromX) * t,
           y: fromY + (this.playerY - fromY) * t,
@@ -1061,7 +1237,7 @@ class BeatParryGame {
           vy: Math.sin(angle) * speed,
           life: 1,
           color: burstColors[i % burstColors.length],
-          size: cosmic ? 2 + Math.random() * 5 : fortune ? 2 + Math.random() * 4 : 3 + Math.random() * 4,
+          size: cosmic ? 2 + Math.random() * 5 : juggernaut ? 3 + Math.random() * 5 : fortune ? 2 + Math.random() * 4 : 3 + Math.random() * 4,
         });
       }
 
@@ -1143,10 +1319,300 @@ class BeatParryGame {
     }
   }
 
+  hasElectricSkill(id) {
+    return this.isElectricSkin() && this.hasAbility(id);
+  }
+
+  isElectricSkin() {
+    return this.activeSkin?.effect === 'electric' || this.activeSkin?.id === 'skin-electric';
+  }
+
+  isElectricBoomActive(nowMs = performance.now()) {
+    return nowMs < (this.abilityState.electricBoomUntilMs || 0);
+  }
+
+  triggerElectricBeam() {
+    this.startElectricBeamHold();
+  }
+
+  startElectricBeamHold() {
+    if (!this.hasElectricSkill('electric-beam')) return;
+    if (this.abilityState.electricBeamHolding) return;
+    const now = performance.now();
+    if (now - (this.abilityState.lastElectricBeamMs || 0) < 1500) return;
+
+    this.abilityState.electricBeamHolding = true;
+    this.abilityState.lastElectricBeamMs = now;
+    audioEngine.playParrySound('excellent');
+    this.screenShake = 10;
+
+    if (this.playMode === 'boss') {
+      const target = this.getBossAimTarget();
+      const angle = target
+        ? Math.atan2(target.y - this.playerY, target.x - this.playerX)
+        : -Math.PI / 2;
+      this.electricBeamFx = {
+        startMs: now,
+        durationMs: Number.POSITIVE_INFINITY,
+        held: true,
+        cx: this.playerX,
+        cy: this.playerY,
+        angle,
+        width: 28,
+        lastTickMs: now,
+      };
+      this.stunBoss(400, now);
+      return;
+    }
+
+    if (this.playMode === 'dodge') {
+      this.electricBeamFx = {
+        startMs: now,
+        durationMs: Number.POSITIVE_INFINITY,
+        held: true,
+        cx: this.playerX,
+        cy: this.playerY,
+        angle: 0,
+        width: 40,
+        lastTickMs: now,
+        dodgeField: true,
+      };
+      this.applyElectricBeamDodgePulse(now);
+      return;
+    }
+
+    this.abilityState.electricParryBoost = true;
+    this.electricBeamFx = {
+      startMs: now,
+      durationMs: Number.POSITIVE_INFINITY,
+      held: true,
+      cx: this.centerX,
+      cy: this.centerY,
+      angle: -Math.PI / 2,
+      width: 22,
+      parryAura: true,
+    };
+    for (let i = 0; i < 20; i++) {
+      const a = (Math.PI * 2 * i) / 20;
+      this.particles.push({
+        x: this.centerX,
+        y: this.centerY,
+        vx: Math.cos(a) * (100 + Math.random() * 140),
+        vy: Math.sin(a) * (100 + Math.random() * 140),
+        life: 1,
+        color: ['#44ddff', '#aa66ff', '#ffffff'][i % 3],
+        size: 2 + Math.random() * 4,
+      });
+    }
+    if (this.onScoreUpdate) {
+      this.onScoreUpdate({
+        score: this.score,
+        combo: this.combo,
+        rating: null,
+        side: null,
+        lane: null,
+        ability: 'electric-beam',
+      });
+    }
+  }
+
+  stopElectricBeamHold() {
+    if (!this.abilityState.electricBeamHolding) return;
+    this.abilityState.electricBeamHolding = false;
+    this.abilityState.lastElectricBeamMs = performance.now();
+    if (this.abilityState.electricParryBoost && this.electricBeamFx?.parryAura) {
+      this.abilityState.electricParryBoost = false;
+    }
+    this.electricBeamFx = null;
+  }
+
+  applyElectricBeamDodgePulse(nowMs) {
+    for (const bullet of this.dodgeBullets) {
+      if (bullet.hit || bullet.state === 'done') continue;
+      bullet.electricStunUntil = nowMs + 400;
+      bullet.electricExplodeAt = nowMs + 1500;
+      bullet.electricShake = true;
+      bullet.state = bullet.state === 'warning' ? 'warning' : 'firing';
+    }
+  }
+
+  triggerElectricBoom() {
+    if (!this.hasElectricSkill('electric-boom')) return;
+    const now = performance.now();
+    if (now - (this.abilityState.lastElectricBoomMs || 0) < 4500) return;
+    this.abilityState.lastElectricBoomMs = now;
+
+    if (this.playMode === 'dodge' || this.playMode === 'boss') {
+      this.abilityState.electricBoomUntilMs = now + 5500;
+      this.dodgeInvincibleUntilMs = now + 400;
+      this.screenShake = 14;
+      audioEngine.playParrySound('excellent');
+      for (let i = 0; i < 40; i++) {
+        const a = (Math.PI * 2 * i) / 40;
+        this.particles.push({
+          x: this.playerX,
+          y: this.playerY,
+          vx: Math.cos(a) * (180 + Math.random() * 240),
+          vy: Math.sin(a) * (180 + Math.random() * 240),
+          life: 1,
+          color: ['#44ddff', '#8866ff', '#e8f8ff', '#ffffff'][i % 4],
+          size: 4 + Math.random() * 5,
+        });
+      }
+      if (this.onScoreUpdate) {
+        this.onScoreUpdate({
+          score: this.score,
+          combo: this.combo,
+          rating: null,
+          side: null,
+          lane: null,
+          ability: 'electric-boom',
+        });
+      }
+      return;
+    }
+
+    const DASH_MS = 420;
+    const skipSec = this.endlessMode ? 4 : 6;
+    const current = audioEngine.getCurrentTime();
+    const maxTime = this.song.duration ? this.song.duration - 1.5 : current + skipSec;
+    const newTime = Math.min(current + skipSec, maxTime);
+    const skippedCount = this.applyVoidDashParrySkip(current, newTime);
+    audioEngine.seekTo(newTime);
+    this.notes = [];
+    if (!this.endlessMode && this.beatMap.length) {
+      while (this.noteIndex < this.beatMap.length && this.beatMap[this.noteIndex].time <= newTime) {
+        this.noteIndex++;
+      }
+    }
+    this.voidDashEffect = {
+      fromX: this.centerX,
+      fromY: this.centerY,
+      toX: this.centerX,
+      toY: this.centerY,
+      startMs: now,
+      durationMs: DASH_MS,
+      parry: true,
+      electric: true,
+    };
+    this.voidDashUntilMs = now + DASH_MS;
+    this.screenShake = 12;
+    audioEngine.playParrySound('excellent');
+    if (!skippedCount) {
+      for (let i = 0; i < 36; i++) {
+        const angle = (Math.PI * 2 * i) / 36;
+        const speed = 120 + Math.random() * 180;
+        this.particles.push({
+          x: this.centerX,
+          y: this.centerY,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1,
+          color: ['#44ddff', '#aa66ff', '#e8f8ff'][i % 3],
+          size: 3 + Math.random() * 5,
+        });
+      }
+    }
+  }
+
+  updateElectricBeamFx(nowMs) {
+    const beam = this.electricBeamFx;
+    if (!beam) return;
+
+    if (beam.held) {
+      if (!this.abilityState.electricBeamHolding || !this.hasElectricSkill('electric-beam')) {
+        this.stopElectricBeamHold();
+        return;
+      }
+
+      // Always keep the beam glued to the player while held.
+      if (beam.parryAura) {
+        beam.cx = this.centerX;
+        beam.cy = this.centerY;
+        this.abilityState.electricParryBoost = true;
+        return;
+      }
+
+      beam.cx = this.playerX;
+      beam.cy = this.playerY;
+
+      if (beam.dodgeField) {
+        if (nowMs - (beam.lastTickMs || beam.startMs) >= 120) {
+          beam.lastTickMs = nowMs;
+          this.applyElectricBeamDodgePulse(nowMs);
+        }
+        return;
+      }
+
+      if (this.playMode !== 'boss' || !this.boss || this.bossRoundCleared) return;
+
+      const target = this.getBossAimTarget();
+      if (target) {
+        beam.angle = Math.atan2(target.y - beam.cy, target.x - beam.cx);
+      }
+      if (nowMs - (beam.lastTickMs || beam.startMs) < 80) return;
+      beam.lastTickMs = nowMs;
+      const len = Math.max(this.canvas.width, this.canvas.height) * 1.1;
+      const ex = beam.cx + Math.cos(beam.angle) * len;
+      const ey = beam.cy + Math.sin(beam.angle) * len;
+      if (this.bossContainsLineHit(beam.cx, beam.cy, ex, ey, beam.width)) {
+        this.damageBoss(28 + Math.floor(this.boss.maxHealth * 0.004), nowMs);
+      }
+      for (const minion of this.bossMinions) {
+        if (segmentHitsCircle(beam.cx, beam.cy, ex, ey, minion.x, minion.y, minion.size)) {
+          minion.health -= 40;
+          if (minion.health <= 0) minion.dead = true;
+        }
+      }
+      this.bossMinions = this.bossMinions.filter((m) => !m.dead);
+      return;
+    }
+
+    // Non-held (legacy burst) beams also track the player while they last.
+    if (this.playMode === 'boss' || this.playMode === 'dodge') {
+      beam.cx = this.playerX;
+      beam.cy = this.playerY;
+    }
+
+    if (nowMs - beam.startMs > beam.durationMs) {
+      this.electricBeamFx = null;
+      return;
+    }
+    if (this.playMode !== 'boss' || !this.boss || this.bossRoundCleared) return;
+    if (nowMs - (beam.lastTickMs || beam.startMs) < 80) return;
+    beam.lastTickMs = nowMs;
+    const target = this.getBossAimTarget();
+    if (target) {
+      beam.angle = Math.atan2(target.y - beam.cy, target.x - beam.cx);
+    }
+    const len = Math.max(this.canvas.width, this.canvas.height) * 1.1;
+    const ex = beam.cx + Math.cos(beam.angle) * len;
+    const ey = beam.cy + Math.sin(beam.angle) * len;
+    if (this.bossContainsLineHit(beam.cx, beam.cy, ex, ey, beam.width)) {
+      this.damageBoss(42 + Math.floor(this.boss.maxHealth * 0.006), nowMs);
+    }
+    for (const minion of this.bossMinions) {
+      if (segmentHitsCircle(beam.cx, beam.cy, ex, ey, minion.x, minion.y, minion.size)) {
+        minion.health -= 55;
+        if (minion.health <= 0) minion.dead = true;
+      }
+    }
+    this.bossMinions = this.bossMinions.filter((m) => !m.dead);
+  }
+
+  bossContainsLineHit(x1, y1, x2, y2, padding) {
+    if (!this.boss) return false;
+    const boss = this.boss;
+    const half = this.getBossHalfSize(boss);
+    return segmentHitsCircle(x1, y1, x2, y2, boss.x, boss.y, half + padding);
+  }
+
   getAbilityHints() {
     const hints = [];
     if (this.hasAbility('op-overdrive')) hints.push('SPACE');
     if (this.hasAbility('op-void-dash')) hints.push('V');
+    if (this.hasElectricSkill('electric-beam')) hints.push('Hold Q Beam');
+    if (this.hasElectricSkill('electric-boom')) hints.push('E Boom');
     return hints;
   }
 
@@ -1222,11 +1688,12 @@ class BeatParryGame {
       const comboCap = 50 + (this.skinPassives.comboCapBonus || 0);
       const comboBonus = this.trainingMode ? 0 : Math.min(this.combo * 2, comboCap);
       const scoreMult = this.skinPassives.scoreMult || 1;
+      const electricBoost = (!this.trainingMode && this.abilityState.electricParryBoost) ? 1.35 : 1;
       if (!this.trainingMode && this.hasAbility('score-boost')) {
-        points = Math.floor((points + comboBonus) * 1.25 * scoreMult);
+        points = Math.floor((points + comboBonus) * 1.25 * scoreMult * electricBoost);
         this.score += points;
       } else {
-        this.score += Math.floor((points + comboBonus) * scoreMult);
+        this.score += Math.floor((points + comboBonus) * scoreMult * electricBoost);
       }
       this.combo++;
       this.maxCombo = Math.max(this.maxCombo, this.combo);
@@ -1342,6 +1809,7 @@ class BeatParryGame {
       this.updateNotes(dt, currentTime);
       this.updateParticles(dt);
       this.updateKeyFlash(dt);
+      this.updateElectricBeamFx(now);
 
       if (this.screenShake > 0) {
         this.screenShake = Math.max(0, this.screenShake - dt * 20);
@@ -1434,6 +1902,7 @@ class BeatParryGame {
     this.drawParticles(ctx);
     this.drawOverdriveWave(ctx);
     this.drawVoidDashEffect(ctx);
+    this.drawElectricBeam(ctx);
     this.drawKeyIndicators(ctx);
     if (this.trainingMode) this.drawTrainingHints(ctx);
     this.song = prevSong;
@@ -1458,6 +1927,7 @@ class BeatParryGame {
     this.drawParticles(ctx);
     this.drawOverdriveWave(ctx);
     this.drawVoidDashEffect(ctx);
+    this.drawElectricBeam(ctx);
     this.drawDodgeHints(ctx);
 
     ctx.restore();
@@ -1578,7 +2048,14 @@ class BeatParryGame {
     return this.activeSkin?.effect === 'fortune' || this.activeSkin?.id === 'skin-fortune-crown';
   }
 
+  isJuggernautSkin() {
+    return this.activeSkin?.effect === 'juggernaut' || this.activeSkin?.id === 'skin-juggernaut';
+  }
+
   getSpecialSkinFx() {
+    if (this.isJuggernautSkin() && this.hasAbility('op-overdrive') && this.hasAbility('op-void-dash')) {
+      return 'juggernaut';
+    }
     if (this.isCosmicSkin()) return 'cosmic';
     if (this.isFortuneSkin()) return 'fortune';
     return null;
@@ -1613,6 +2090,61 @@ class BeatParryGame {
     }));
   }
 
+  initJuggernautOrbitals() {
+    if (!this.isJuggernautSkin()) {
+      this.juggernautOrbitals = [];
+      return;
+    }
+    this.juggernautOrbitals = Array.from({ length: 6 }, (_, i) => ({
+      angle: (Math.PI * 2 * i) / 6,
+      dist: 0.65 + (i % 2) * 0.2,
+      speed: 0.35 + (i % 3) * 0.15,
+      size: 2.5 + (i % 2) * 1.2,
+      twinkle: Math.random() * Math.PI * 2,
+      hex: true,
+    }));
+  }
+
+  initElectricOrbitals() {
+    if (!this.isElectricSkin()) {
+      this.electricOrbitals = [];
+      return;
+    }
+    this.electricOrbitals = Array.from({ length: 8 }, (_, i) => ({
+      angle: (Math.PI * 2 * i) / 8,
+      dist: 0.55 + (i % 3) * 0.18,
+      speed: 0.5 + (i % 4) * 0.12,
+      size: 2 + (i % 2) * 1.5,
+      twinkle: Math.random() * Math.PI * 2,
+      bolt: i % 2 === 0,
+    }));
+  }
+
+  drawJuggernautHex(ctx, x, y, radius, rotation, fill, stroke, lineWidth = 2) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI * 2 * i) / 6 - Math.PI / 6;
+      const px = Math.cos(a) * radius;
+      const py = Math.sin(a) * radius;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    if (fill) {
+      ctx.fillStyle = fill;
+      ctx.fill();
+    }
+    if (stroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = lineWidth;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   updateSkinTrail(x, y) {
     if (!this.skinPassives.trail) return;
     this._skinTrailTick = (this._skinTrailTick || 0) + 1;
@@ -1641,6 +2173,30 @@ class BeatParryGame {
         coin: Math.random() > 0.6,
       });
       if (this.skinTrail.length > 32) this.skinTrail.shift();
+    } else if (this.isJuggernautSkin()) {
+      const palette = ['#ff5500', '#ff3300', '#ffcc44', '#661111', '#ff7722', '#3d1810'];
+      this.skinTrail.push({
+        x: x + (Math.random() - 0.5) * 12,
+        y: y + (Math.random() - 0.5) * 12,
+        life: 1,
+        color: palette[Math.floor(Math.random() * palette.length)],
+        size: 2.5 + Math.random() * 5,
+        slag: Math.random() > 0.45,
+        ember: Math.random() > 0.5,
+      });
+      if (this.skinTrail.length > 30) this.skinTrail.shift();
+    } else if (this.isElectricSkin()) {
+      const palette = ['#44ddff', '#8866ff', '#e8f8ff', '#aaf0ff', '#cc88ff', '#ffffff'];
+      this.skinTrail.push({
+        x: x + (Math.random() - 0.5) * 14,
+        y: y + (Math.random() - 0.5) * 14,
+        life: 1,
+        color: palette[Math.floor(Math.random() * palette.length)],
+        size: 2 + Math.random() * 4.5,
+        bolt: Math.random() > 0.4,
+        spark: Math.random() > 0.55,
+      });
+      if (this.skinTrail.length > 34) this.skinTrail.shift();
     } else {
       this.skinTrail.push({
         x,
@@ -1654,7 +2210,7 @@ class BeatParryGame {
     }
 
     for (const point of this.skinTrail) {
-      point.life -= this.isCosmicSkin() ? 0.035 : this.isFortuneSkin() ? 0.045 : 0.06;
+      point.life -= this.isCosmicSkin() ? 0.035 : this.isFortuneSkin() ? 0.045 : this.isJuggernautSkin() ? 0.05 : this.isElectricSkin() ? 0.048 : 0.06;
     }
     this.skinTrail = this.skinTrail.filter((point) => point.life > 0);
   }
@@ -1681,6 +2237,45 @@ class BeatParryGame {
         ctx.fillStyle = point.color;
         ctx.shadowColor = point.color;
         ctx.shadowBlur = this.isFortuneSkin() ? 10 : 6;
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, s, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (point.slag) {
+        const s = (point.size || 4) * point.life;
+        ctx.globalAlpha = point.life * 0.8;
+        ctx.fillStyle = point.color;
+        ctx.save();
+        ctx.translate(point.x, point.y);
+        ctx.rotate(point.life * 4);
+        ctx.fillRect(-s, -s * 0.6, s * 2, s * 1.2);
+        ctx.restore();
+      } else if (point.ember) {
+        const s = (point.size || 3) * point.life;
+        ctx.globalAlpha = point.life * 0.95;
+        ctx.fillStyle = point.color;
+        ctx.shadowColor = '#ff5500';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, s, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (point.bolt) {
+        const s = (point.size || 3) * point.life;
+        ctx.globalAlpha = point.life * 0.9;
+        ctx.strokeStyle = point.color;
+        ctx.lineWidth = 2;
+        ctx.shadowColor = '#44ddff';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.moveTo(point.x - s, point.y - s * 0.4);
+        ctx.lineTo(point.x + s * 0.2, point.y);
+        ctx.lineTo(point.x - s * 0.3, point.y + s * 0.5);
+        ctx.stroke();
+      } else if (point.spark) {
+        const s = (point.size || 3) * point.life;
+        ctx.globalAlpha = point.life * 0.85;
+        ctx.fillStyle = point.color;
+        ctx.shadowColor = '#8866ff';
+        ctx.shadowBlur = 8;
         ctx.beginPath();
         ctx.arc(point.x, point.y, s, 0, Math.PI * 2);
         ctx.fill();
@@ -1924,8 +2519,202 @@ class BeatParryGame {
     ctx.stroke();
   }
 
+  drawJuggernautPlayer(ctx, x, y, r) {
+    const t = performance.now() * 0.001;
+    const colors = this.activeSkin?.colors || {};
+
+    const auraR = r + 46;
+    const aura = ctx.createRadialGradient(x, y, r * 0.2, x, y, auraR);
+    aura.addColorStop(0, 'rgba(255, 85, 0, 0.35)');
+    aura.addColorStop(0.45, 'rgba(170, 34, 0, 0.18)');
+    aura.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(x, y, auraR, 0, Math.PI * 2);
+    ctx.fill();
+
+    for (const plate of this.juggernautOrbitals) {
+      plate.angle += plate.speed * 0.014;
+      const dist = r + 16 + plate.dist * 20;
+      const px = x + Math.cos(plate.angle) * dist;
+      const py = y + Math.sin(plate.angle) * dist;
+      const alpha = 0.5 + Math.sin(t * 3.5 + plate.twinkle) * 0.2;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      this.drawJuggernautHex(
+        ctx,
+        px,
+        py,
+        plate.size + 2,
+        plate.angle + t * 0.5,
+        colors.plate || '#661111',
+        colors.accent || '#ffdd55',
+        1.5
+      );
+      ctx.restore();
+    }
+
+    const pauldronY = r * 0.55;
+    for (const side of [-1, 1]) {
+      ctx.save();
+      ctx.translate(x + side * (r + 5), y - pauldronY);
+      ctx.rotate(side * 0.25);
+      this.drawJuggernautHex(
+        ctx,
+        0,
+        0,
+        r * 0.42,
+        t * 0.3,
+        colors.slag || '#3d1810',
+        colors.glow || '#ff5500',
+        2
+      );
+      ctx.restore();
+    }
+
+    this.drawJuggernautHex(
+      ctx,
+      x,
+      y,
+      r + 5,
+      t * 0.2,
+      'rgba(255, 85, 0, 0.12)',
+      'rgba(255, 119, 34, 0.35)',
+      2
+    );
+
+    this.drawJuggernautHex(
+      ctx,
+      x,
+      y,
+      r,
+      -t * 0.15,
+      colors.primary || '#2a0808',
+      colors.accent || '#ffdd55',
+      3
+    );
+
+    for (let i = 0; i < 5; i++) {
+      const crackAngle = t * 0.4 + (Math.PI * 2 * i) / 5;
+      const cx = x + Math.cos(crackAngle) * r * 0.55;
+      const cy = y + Math.sin(crackAngle) * r * 0.55;
+      const pulse = 0.55 + Math.sin(t * 6 + i) * 0.25;
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = colors.lava || '#ff3300';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = colors.lava || '#ff3300';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(crackAngle + 0.5) * 8, cy + Math.sin(crackAngle + 0.5) * 8);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = colors.core || '#ff7722';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    const coreGrad = ctx.createRadialGradient(x - r * 0.2, y - r * 0.22, 0, x, y, r * 0.55);
+    coreGrad.addColorStop(0, colors.core || '#ff7722');
+    coreGrad.addColorStop(0.6, colors.lava || '#ff3300');
+    coreGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.55, 0, Math.PI * 2);
+    ctx.fillStyle = coreGrad;
+    ctx.fill();
+
+    const pulse = 1 + Math.sin(t * 3) * 0.05;
+    ctx.strokeStyle = this.ballColorToRgba(colors.accent || '#ffdd55', 0.9);
+    ctx.lineWidth = 2.5;
+    this.drawJuggernautHex(ctx, x, y, (r + 3) * pulse, t * 0.1, null, colors.accent || '#ffdd55', 2);
+  }
+
+  drawElectricPlayer(ctx, x, y, r) {
+    const t = performance.now() * 0.001;
+    const colors = this.activeSkin?.colors || {};
+    const boomActive = this.isElectricBoomActive();
+
+    const auraR = r + (boomActive ? 58 : 44);
+    const aura = ctx.createRadialGradient(x, y, r * 0.15, x, y, auraR);
+    aura.addColorStop(0, boomActive ? 'rgba(68, 221, 255, 0.45)' : 'rgba(68, 221, 255, 0.28)');
+    aura.addColorStop(0.4, 'rgba(136, 102, 255, 0.16)');
+    aura.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(x, y, auraR, 0, Math.PI * 2);
+    ctx.fill();
+
+    for (const arc of this.electricOrbitals) {
+      arc.angle += arc.speed * 0.018;
+      const dist = r + 14 + arc.dist * 22;
+      const px = x + Math.cos(arc.angle) * dist;
+      const py = y + Math.sin(arc.angle) * dist;
+      const alpha = 0.45 + Math.sin(t * 5 + arc.twinkle) * 0.25;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      if (arc.bolt) {
+        ctx.strokeStyle = colors.glow || '#44ddff';
+        ctx.lineWidth = 2;
+        ctx.shadowColor = '#8866ff';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.moveTo(px - 4, py);
+        ctx.lineTo(px + 1, py - 3);
+        ctx.lineTo(px - 1, py + 4);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = colors.arc || '#cc88ff';
+        ctx.shadowColor = colors.glow || '#44ddff';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(px, py, arc.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    for (let i = 0; i < 6; i++) {
+      const boltAngle = t * 2.2 + (Math.PI * 2 * i) / 6;
+      const bx = x + Math.cos(boltAngle) * (r + 8);
+      const by = y + Math.sin(boltAngle) * (r + 8);
+      ctx.save();
+      ctx.globalAlpha = 0.35 + Math.sin(t * 8 + i) * 0.2;
+      ctx.strokeStyle = colors.bolt || '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = colors.glow || '#44ddff';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx + Math.cos(boltAngle + 0.8) * 10, by + Math.sin(boltAngle + 0.8) * 10);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    const coreGrad = ctx.createRadialGradient(x - r * 0.15, y - r * 0.2, 0, x, y, r);
+    coreGrad.addColorStop(0, colors.core || '#aaf0ff');
+    coreGrad.addColorStop(0.45, colors.glow || '#44ddff');
+    coreGrad.addColorStop(0.85, colors.primary || '#0a1628');
+    coreGrad.addColorStop(1, 'rgba(0,0,0,0.85)');
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = coreGrad;
+    ctx.fill();
+
+    const pulse = 1 + Math.sin(t * 4) * 0.06;
+    ctx.strokeStyle = this.ballColorToRgba(colors.accent || '#e8f8ff', boomActive ? 1 : 0.85);
+    ctx.lineWidth = boomActive ? 3.5 : 2.5;
+    ctx.shadowColor = colors.glow || '#44ddff';
+    ctx.shadowBlur = boomActive ? 18 : 10;
+    ctx.beginPath();
+    ctx.arc(x, y, (r + 2) * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
   drawSkinAura(ctx, x, y, r) {
-    if (this.isCosmicSkin() || this.isFortuneSkin()) return;
+    if (this.isCosmicSkin() || this.isFortuneSkin() || this.isJuggernautSkin() || this.isElectricSkin()) return;
     const ring = this.activeSkin?.colors?.ring;
     if (!ring && this.activeSkin?.tier < 4) return;
     const pulse = 1 + Math.sin(performance.now() * 0.006) * 0.08;
@@ -1954,6 +2743,16 @@ class BeatParryGame {
 
     if (this.isFortuneSkin()) {
       this.drawFortunePlayer(ctx, this.centerX, this.centerY, r);
+      return;
+    }
+
+    if (this.isJuggernautSkin()) {
+      this.drawJuggernautPlayer(ctx, this.centerX, this.centerY, r);
+      return;
+    }
+
+    if (this.isElectricSkin()) {
+      this.drawElectricPlayer(ctx, this.centerX, this.centerY, r);
       return;
     }
 
@@ -2102,15 +2901,24 @@ class BeatParryGame {
   }
 
   drawDodgeBullets(ctx) {
+    const now = performance.now();
     for (const bullet of this.dodgeBullets) {
       if (bullet.state !== 'firing' || bullet.hit) continue;
 
+      const stunned = bullet.electricStunUntil && now < bullet.electricStunUntil;
       const trailX = bullet.x - Math.cos(bullet.angle) * 18;
       const trailY = bullet.y - Math.sin(bullet.angle) * 18;
 
       ctx.save();
-      ctx.strokeStyle = 'rgba(255, 80, 80, 0.5)';
-      ctx.lineWidth = 4;
+      if (stunned) {
+        ctx.strokeStyle = 'rgba(68, 221, 255, 0.65)';
+        ctx.shadowColor = '#8866ff';
+        ctx.shadowBlur = 14;
+        ctx.lineWidth = 5;
+      } else {
+        ctx.strokeStyle = 'rgba(255, 80, 80, 0.5)';
+        ctx.lineWidth = 4;
+      }
       ctx.beginPath();
       ctx.moveTo(trailX, trailY);
       ctx.lineTo(bullet.x, bullet.y);
@@ -2118,11 +2926,19 @@ class BeatParryGame {
 
       ctx.beginPath();
       ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
-      ctx.fillStyle = '#ff4444';
+      ctx.fillStyle = stunned ? '#44ddff' : '#ff4444';
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      ctx.strokeStyle = stunned ? 'rgba(232, 248, 255, 0.9)' : 'rgba(255,255,255,0.7)';
       ctx.lineWidth = 2;
       ctx.stroke();
+      if (stunned && bullet.electricExplodeAt) {
+        const fuse = Math.max(0, (bullet.electricExplodeAt - now) / 1500);
+        ctx.strokeStyle = `rgba(170, 102, 255, ${0.4 + (1 - fuse) * 0.5})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(bullet.x, bullet.y, bullet.radius + 4 + (1 - fuse) * 6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       ctx.restore();
     }
   }
@@ -2174,6 +2990,18 @@ class BeatParryGame {
 
     if (this.isFortuneSkin()) {
       this.drawFortunePlayer(ctx, this.playerX, this.playerY, r);
+      if (invincible) ctx.restore();
+      return;
+    }
+
+    if (this.isJuggernautSkin()) {
+      this.drawJuggernautPlayer(ctx, this.playerX, this.playerY, r);
+      if (invincible) ctx.restore();
+      return;
+    }
+
+    if (this.isElectricSkin()) {
+      this.drawElectricPlayer(ctx, this.playerX, this.playerY, r);
       if (invincible) ctx.restore();
       return;
     }
@@ -2542,6 +3370,11 @@ class BeatParryGame {
       return;
     }
 
+    if (this.voidDashEffect.electric) {
+      this.drawElectricVoidDash(ctx, fromX, fromY, toX, toY, cx, cy, t, alpha, parry);
+      return;
+    }
+
     const color = parry ? '170, 68, 255' : '136, 102, 255';
 
     ctx.save();
@@ -2663,6 +3496,189 @@ class BeatParryGame {
     ctx.restore();
   }
 
+  drawElectricVoidDash(ctx, fromX, fromY, toX, toY, cx, cy, t, alpha, parry) {
+    ctx.save();
+    const steps = parry ? 12 : 8;
+    for (let i = 0; i <= steps; i++) {
+      const stepT = (i / steps) * t;
+      const px = fromX + (toX - fromX) * stepT;
+      const py = fromY + (toY - fromY) * stepT;
+      const stepAlpha = alpha * (0.3 + (1 - stepT) * 0.5);
+      ctx.strokeStyle = i % 2 === 0 ? `rgba(68, 221, 255, ${stepAlpha})` : `rgba(170, 102, 255, ${stepAlpha})`;
+      ctx.lineWidth = 2 + (1 - stepT) * 4;
+      ctx.beginPath();
+      ctx.moveTo(px - 6, py);
+      ctx.lineTo(px + 2, py - 5);
+      ctx.lineTo(px - 2, py + 6);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, 16 + (1 - t) * 30, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(232, 248, 255, ${alpha * 0.9})`;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.fillStyle = `rgba(68, 221, 255, ${alpha * 0.2})`;
+    ctx.fill();
+    if (parry) {
+      for (let i = 0; i < 3; i++) {
+        const ringR = 36 + t * (90 + i * 28);
+        ctx.strokeStyle = `rgba(136, 102, 255, ${alpha * (0.6 - i * 0.15)})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  drawElectricBeam(ctx) {
+    const beam = this.electricBeamFx;
+    if (!beam) return;
+    const now = performance.now();
+
+    // Draw from the live player position so the beam never lags behind movement.
+    const ox = beam.parryAura
+      ? this.centerX
+      : (this.playMode === 'boss' || this.playMode === 'dodge' || beam.held)
+        ? this.playerX
+        : beam.cx;
+    const oy = beam.parryAura
+      ? this.centerY
+      : (this.playMode === 'boss' || this.playMode === 'dodge' || beam.held)
+        ? this.playerY
+        : beam.cy;
+    beam.cx = ox;
+    beam.cy = oy;
+
+    if (beam.dodgeField || beam.parryAura) {
+      const pulse = 0.55 + Math.sin(now / 90) * 0.25;
+      const radius = beam.dodgeField ? 70 : 90;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const glow = ctx.createRadialGradient(ox, oy, 8, ox, oy, radius);
+      glow.addColorStop(0, `rgba(232, 248, 255, ${0.55 * pulse})`);
+      glow.addColorStop(0.45, `rgba(68, 221, 255, ${0.35 * pulse})`);
+      glow.addColorStop(1, 'rgba(136, 102, 255, 0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(ox, oy, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+
+    if (this.playMode === 'boss' && this.boss && !this.bossRoundCleared) {
+      const target = this.getBossAimTarget();
+      if (target) {
+        beam.angle = Math.atan2(target.y - oy, target.x - ox);
+      }
+    }
+
+    const t = beam.held ? 0 : Math.min(1, (now - beam.startMs) / beam.durationMs);
+    const alpha = beam.held ? (0.75 + Math.sin(now / 50) * 0.2) : (1 - t) * 0.95;
+    const len = Math.max(this.canvas.width, this.canvas.height) * 1.15;
+    const ex = ox + Math.cos(beam.angle) * len;
+    const ey = oy + Math.sin(beam.angle) * len;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const grad = ctx.createLinearGradient(ox, oy, ex, ey);
+    grad.addColorStop(0, `rgba(232, 248, 255, ${alpha})`);
+    grad.addColorStop(0.35, `rgba(68, 221, 255, ${alpha * 0.9})`);
+    grad.addColorStop(0.65, `rgba(170, 102, 255, ${alpha * 0.75})`);
+    grad.addColorStop(1, `rgba(68, 221, 255, 0)`);
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = beam.width * (0.8 + Math.sin(now / 30) * 0.2);
+    ctx.shadowColor = '#44ddff';
+    ctx.shadowBlur = 24;
+    ctx.beginPath();
+    ctx.moveTo(ox, oy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+
+    for (let i = 0; i < 5; i++) {
+      const forkT = 0.2 + i * 0.15;
+      const fx = ox + Math.cos(beam.angle) * len * forkT;
+      const fy = oy + Math.sin(beam.angle) * len * forkT;
+      const forkAngle = beam.angle + (i % 2 === 0 ? 0.35 : -0.35);
+      const flen = 40 + Math.sin(now / 50 + i) * 20;
+      ctx.strokeStyle = `rgba(170, 102, 255, ${alpha * 0.5})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(fx, fy);
+      ctx.lineTo(fx + Math.cos(forkAngle) * flen, fy + Math.sin(forkAngle) * flen);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  initJuggernautBoss() {
+    this.bossRoundKit = getJuggernautRoundKit();
+    this.boss = createJuggernautBossState(this.centerX, this.canvas.height);
+    this.bossRound = 1;
+    this.trainingLevel = 1;
+    this.bossAttacks = [];
+    this.bossMinions = [];
+    this.bossProjectiles = [];
+    this.bossRoundCleared = false;
+    this.bossClearUntilMs = 0;
+    this.bossAttackIndex = 0;
+    const now = performance.now();
+    this.bossNextAttackMs = now + 600;
+    this.playerNextFireMs = now;
+    this._juggernautMinionTimer = now + 2200;
+    if (this.onScoreUpdate) {
+      this.onScoreUpdate({
+        score: this.score,
+        combo: this.combo,
+        rating: null,
+        side: null,
+        lane: null,
+        health: this.dodgeHealth,
+        maxHealth: this.dodgeMaxHealth,
+        bossHealth: this.boss.health,
+        bossMaxHealth: this.boss.maxHealth,
+        bossRound: 1,
+        bossSkill: this.boss.signature,
+        minionCount: 0,
+      });
+    }
+  }
+
+  initElectricRaidBoss() {
+    this.bossRoundKit = getElectricRaidRoundKit();
+    this.boss = createElectricRaidBossState(this.centerX, this.canvas.height);
+    this.bossRound = 1;
+    this.trainingLevel = 1;
+    this.bossAttacks = [];
+    this.bossMinions = [];
+    this.bossProjectiles = [];
+    this.bossRoundCleared = false;
+    this.bossClearUntilMs = 0;
+    this.bossAttackIndex = 0;
+    const now = performance.now();
+    this.bossNextAttackMs = now + 450;
+    this.playerNextFireMs = now;
+    this._electricRaidMinionTimer = now + 1600;
+    if (this.onScoreUpdate) {
+      this.onScoreUpdate({
+        score: this.score,
+        combo: this.combo,
+        rating: null,
+        side: null,
+        lane: null,
+        health: this.dodgeHealth,
+        maxHealth: this.dodgeMaxHealth,
+        bossHealth: this.boss.health,
+        bossMaxHealth: this.boss.maxHealth,
+        bossRound: 1,
+        bossSkill: this.boss.signature,
+        minionCount: 0,
+      });
+    }
+  }
+
   initBossRound(round) {
     const maxHealth = getBossRoundHealth(round);
     const kit = getBossRoundKit(round);
@@ -2750,10 +3766,16 @@ class BeatParryGame {
           size: 4 + Math.random() * 5,
         });
       }
+      if (this.juggernautEvent) {
+        this.handleJuggernautVictory(nowMs);
+      } else if (this.electricRaidEvent) {
+        this.handleElectricRaidVictory(nowMs);
+      }
     }
   }
 
   advanceBossRound() {
+    if (this.juggernautEvent || this.electricRaidEvent) return;
     if (this.bossRound >= BOSS_MAX_ROUNDS) return;
     this.initBossRound(this.bossRound + 1);
     this.dodgeHealth = Math.min(this.dodgeMaxHealth, this.dodgeHealth + 12);
@@ -2897,13 +3919,15 @@ class BeatParryGame {
   firePlayerWeapon(nowMs) {
     if (!this.boss || this.bossRoundCleared) return;
     const weapon = this.bossWeapon || getBossWeapon(DEFAULT_SKIN_ID);
-    const intervalMs = weapon.fireRate * 1000;
+    const boomActive = this.isElectricBoomActive(nowMs);
+    const intervalMs = weapon.fireRate * 1000 * (boomActive ? 0.7 : 1);
     if (nowMs < this.playerNextFireMs) return;
 
     const target = this.getBossAimTarget();
     if (!target) return;
 
     const baseAngle = Math.atan2(target.y - this.playerY, target.x - this.playerX);
+    const damageMult = boomActive ? 1.38 : 1;
 
     for (let b = 0; b < weapon.burst; b++) {
       const spread = (b - (weapon.burst - 1) / 2) * weapon.spread;
@@ -2911,14 +3935,15 @@ class BeatParryGame {
       this.bossProjectiles.push({
         x: this.playerX,
         y: this.playerY,
-        vx: Math.cos(angle) * weapon.projectileSpeed,
-        vy: Math.sin(angle) * weapon.projectileSpeed,
-        damage: weapon.damage,
+        vx: Math.cos(angle) * weapon.projectileSpeed * (boomActive ? 1.15 : 1),
+        vy: Math.sin(angle) * weapon.projectileSpeed * (boomActive ? 1.15 : 1),
+        damage: Math.floor(weapon.damage * damageMult),
         size: weapon.projectileSize,
         color: weapon.color,
         glow: weapon.glow,
         cosmic: !!weapon.cosmic,
         fortune: !!weapon.fortune,
+        electric: !!weapon.electric,
         pierce: !!weapon.pierce,
         life: 1.2,
       });
@@ -2935,11 +3960,25 @@ class BeatParryGame {
   spawnBossAttacks(nowMs) {
     if (!this.boss || this.bossRoundCleared) return;
     const round = this.bossRound;
-    const kit = this.bossRoundKit || getBossRoundKit(round);
+    const kit = this.bossRoundKit || (this.electricRaidEvent
+      ? getElectricRaidRoundKit()
+      : this.juggernautEvent
+        ? getJuggernautRoundKit()
+        : getBossRoundKit(round));
     const bossSpeedMult = typeof GameConfig !== 'undefined' ? GameConfig.getSpeedMult('boss') : 1;
-    const interval = (getBossAttackInterval(round) * 1000) / bossSpeedMult;
-    const warningMs = 520 * (this.hasAbility('long-warning') ? 1.35 : 1);
-    const speed = getBossProjectileSpeed(round) * bossSpeedMult;
+    const baseInterval = this.electricRaidEvent
+      ? ELECTRIC_RAID_BOSS.attackInterval * 1000
+      : this.juggernautEvent
+        ? JUGGERNAUT_BOSS.attackInterval * 1000
+        : getBossAttackInterval(round) * 1000;
+    const interval = baseInterval / bossSpeedMult;
+    const warningMs = (this.electricRaidEvent ? 300 : this.juggernautEvent ? 380 : 520) * (this.hasAbility('long-warning') ? 1.35 : 1);
+    const speedMult = this.electricRaidEvent
+      ? ELECTRIC_RAID_BOSS.projectileSpeedMult
+      : this.juggernautEvent
+        ? JUGGERNAUT_BOSS.projectileSpeedMult
+        : 1;
+    const speed = getBossProjectileSpeed(round) * bossSpeedMult * speedMult;
 
     while (this.bossNextAttackMs <= nowMs + warningMs + 80) {
       const attackDef = pickBossAttack(kit, this.bossAttackIndex++);
@@ -3066,11 +4105,22 @@ class BeatParryGame {
     this.boss.y = this.canvas.height * 0.28 + Math.cos(this.boss.wobblePhase * 0.7) * 12;
 
     if (this.bossRoundCleared) {
-      if (nowMs >= this.bossClearUntilMs) {
+      if (nowMs >= this.bossClearUntilMs && !this.juggernautEvent && !this.electricRaidEvent) {
         this.advanceBossRound();
       }
       this.updateBossProjectiles(dt);
       return;
+    }
+
+    if (this.electricRaidEvent && this._electricRaidMinionTimer && nowMs >= this._electricRaidMinionTimer) {
+      this.spawnBossMinions('hunter', 3, 12);
+      this.spawnBossMinions('swarm', 8, 12);
+      this._electricRaidMinionTimer = nowMs + ELECTRIC_RAID_BOSS.minionBurstEvery * 1000;
+    }
+    if (this.juggernautEvent && this._juggernautMinionTimer && nowMs >= this._juggernautMinionTimer) {
+      this.spawnBossMinions('brute', 2, 12);
+      this.spawnBossMinions('swarm', 6, 12);
+      this._juggernautMinionTimer = nowMs + JUGGERNAUT_BOSS.minionBurstEvery * 1000;
     }
 
     this.updateBossProjectiles(dt);
@@ -3297,6 +4347,7 @@ class BeatParryGame {
     this.drawParticles(ctx);
     this.drawOverdriveWave(ctx);
     this.drawVoidDashEffect(ctx);
+    this.drawElectricBeam(ctx);
     this.drawBossHints(ctx);
 
     ctx.restore();
@@ -3438,6 +4489,16 @@ class BeatParryGame {
     const half = this.getBossHalfSize(boss);
     const rotation = boss.wobblePhase * 0.35;
 
+    if (boss.juggernaut) {
+      this.drawJuggernautBoss(ctx, boss, half, stunned, rotation);
+      return;
+    }
+
+    if (boss.electricRaid) {
+      this.drawElectricRaidBoss(ctx, boss, half, stunned, rotation);
+      return;
+    }
+
     if (this.isCosmicSkin() && this.bossWeapon?.cosmic) {
       this.drawCosmicBoss(ctx, boss, half, stunned, rotation);
       return;
@@ -3492,6 +4553,130 @@ class BeatParryGame {
     ctx.font = '600 11px Segoe UI, sans-serif';
     ctx.fillStyle = 'rgba(200,200,230,0.8)';
     ctx.fillText(`Round ${boss.round} · ${boss.signature || 'Boss'}`, boss.x, boss.y - half - 4);
+    ctx.restore();
+  }
+
+  drawJuggernautBoss(ctx, boss, half, stunned, rotation) {
+    ctx.save();
+    boss.platePhase = (boss.platePhase || 0) + 0.02;
+    const pulse = 1 + Math.sin(boss.wobblePhase * 2.2) * 0.06;
+
+    ctx.globalAlpha = 0.6;
+    this.drawBossSquare(ctx, boss.x, boss.y, half * 2.4 * pulse, {
+      rotation: rotation * 0.4,
+      fill: 'rgba(255, 34, 0, 0.15)',
+      stroke: 'rgba(255, 136, 0, 0.25)',
+      lineWidth: 2,
+    });
+    ctx.globalAlpha = 1;
+
+    for (let i = 0; i < 4; i++) {
+      const plateHalf = half * (1.1 + i * 0.14);
+      ctx.strokeStyle = i % 2 === 0 ? 'rgba(255, 69, 0, 0.65)' : 'rgba(255, 215, 0, 0.45)';
+      ctx.lineWidth = 3;
+      ctx.save();
+      ctx.translate(boss.x, boss.y);
+      ctx.rotate(rotation + boss.platePhase + i * 0.4);
+      ctx.strokeRect(-plateHalf, -plateHalf, plateHalf * 2, plateHalf * 2);
+      ctx.restore();
+    }
+
+    this.drawBossSquare(ctx, boss.x, boss.y, half, {
+      rotation,
+      fill: stunned ? 'rgba(100,40,20,0.9)' : 'rgba(80,0,0,0.95)',
+      stroke: stunned ? '#ffd700' : '#ff4500',
+      lineWidth: 4,
+      shadowColor: '#ff2200',
+      shadowBlur: 22,
+    });
+
+    if (boss.hitFlash > 0) {
+      ctx.globalAlpha = boss.hitFlash * 0.55;
+      this.drawBossSquare(ctx, boss.x, boss.y, half * 1.1, { rotation, fill: '#ffffff' });
+      ctx.globalAlpha = 1;
+    }
+
+    const eyelidColor = stunned ? 'rgba(100,40,20,0.95)' : 'rgba(60,0,0,0.95)';
+    this.drawBossEyes(ctx, boss, half, rotation, eyelidColor);
+
+    ctx.font = '800 16px Segoe UI, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd700';
+    ctx.fillText(boss.name, boss.x, boss.y - half - 22);
+    ctx.font = '600 11px Segoe UI, sans-serif';
+    ctx.fillStyle = 'rgba(255, 180, 120, 0.9)';
+    ctx.fillText(boss.signature || 'EVENT BOSS', boss.x, boss.y - half - 6);
+    ctx.restore();
+  }
+
+  drawElectricRaidBoss(ctx, boss, half, stunned, rotation) {
+    ctx.save();
+    boss.arcPhase = (boss.arcPhase || 0) + 0.035;
+    const pulse = 1 + Math.sin(boss.wobblePhase * 2.5) * 0.07;
+
+    ctx.globalAlpha = 0.55;
+    this.drawBossSquare(ctx, boss.x, boss.y, half * 2.6 * pulse, {
+      rotation: rotation * 0.35,
+      fill: 'rgba(68, 221, 255, 0.12)',
+      stroke: 'rgba(170, 102, 255, 0.28)',
+      lineWidth: 2,
+      shadowColor: '#44ddff',
+      shadowBlur: 28,
+    });
+    ctx.globalAlpha = 1;
+
+    for (let i = 0; i < 5; i++) {
+      const ringHalf = half * (1.12 + i * 0.12);
+      ctx.strokeStyle = i % 2 === 0 ? 'rgba(68, 221, 255, 0.6)' : 'rgba(170, 102, 255, 0.45)';
+      ctx.lineWidth = 2.5;
+      ctx.save();
+      ctx.translate(boss.x, boss.y);
+      ctx.rotate(rotation + boss.arcPhase + i * 0.55);
+      ctx.setLineDash(i % 2 === 0 ? [10, 6] : []);
+      ctx.strokeRect(-ringHalf, -ringHalf, ringHalf * 2, ringHalf * 2);
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    for (let i = 0; i < 8; i++) {
+      const arcAngle = boss.arcPhase * 2 + (Math.PI * 2 * i) / 8;
+      const ax = boss.x + Math.cos(arcAngle) * half * 1.35;
+      const ay = boss.y + Math.sin(arcAngle) * half * 1.35;
+      ctx.strokeStyle = 'rgba(232, 248, 255, 0.7)';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#8866ff';
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(ax + Math.cos(arcAngle + 0.6) * 16, ay + Math.sin(arcAngle + 0.6) * 16);
+      ctx.stroke();
+    }
+
+    this.drawBossSquare(ctx, boss.x, boss.y, half, {
+      rotation,
+      fill: stunned ? 'rgba(40, 80, 120, 0.9)' : 'rgba(10, 22, 40, 0.96)',
+      stroke: stunned ? '#e8f8ff' : '#44ddff',
+      lineWidth: 4,
+      shadowColor: '#8866ff',
+      shadowBlur: 24,
+    });
+
+    if (boss.hitFlash > 0) {
+      ctx.globalAlpha = boss.hitFlash * 0.55;
+      this.drawBossSquare(ctx, boss.x, boss.y, half * 1.08, { rotation, fill: '#e8f8ff' });
+      ctx.globalAlpha = 1;
+    }
+
+    const eyelidColor = stunned ? 'rgba(40, 80, 120, 0.95)' : 'rgba(10, 22, 40, 0.95)';
+    this.drawBossEyes(ctx, boss, half, rotation, eyelidColor);
+
+    ctx.font = '800 16px Segoe UI, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#aaf0ff';
+    ctx.fillText(boss.name, boss.x, boss.y - half - 22);
+    ctx.font = '600 11px Segoe UI, sans-serif';
+    ctx.fillStyle = 'rgba(170, 200, 255, 0.9)';
+    ctx.fillText(boss.signature || 'RAID BOSS', boss.x, boss.y - half - 6);
     ctx.restore();
   }
 
@@ -3570,6 +4755,10 @@ class BeatParryGame {
       this.drawCosmicPlayer(ctx, this.playerX, this.playerY, r);
     } else if (this.isFortuneSkin()) {
       this.drawFortunePlayer(ctx, this.playerX, this.playerY, r);
+    } else if (this.isJuggernautSkin()) {
+      this.drawJuggernautPlayer(ctx, this.playerX, this.playerY, r);
+    } else if (this.isElectricSkin()) {
+      this.drawElectricPlayer(ctx, this.playerX, this.playerY, r);
     } else {
       const ballColor = this.getPlayerBallColor();
       ctx.beginPath();
@@ -3592,14 +4781,14 @@ class BeatParryGame {
       const target = this.getBossAimTarget();
       if (target) {
         const angle = Math.atan2(target.y - this.playerY, target.x - this.playerX);
-        const gunLen = weapon.cosmic ? 22 : weapon.fortune ? 20 : 16;
+        const gunLen = weapon.cosmic ? 22 : weapon.juggernaut ? 24 : weapon.electric ? 22 : weapon.fortune ? 20 : 16;
         const gx = this.playerX + Math.cos(angle) * (r + 4);
         const gy = this.playerY + Math.sin(angle) * (r + 4);
         ctx.save();
         ctx.translate(gx, gy);
         ctx.rotate(angle);
-        ctx.fillStyle = weapon.cosmic ? '#e040fb' : weapon.fortune ? '#ffd700' : weapon.color;
-        ctx.strokeStyle = weapon.cosmic ? '#b8f0ff' : weapon.fortune ? '#fff8dc' : '#ffffff';
+        ctx.fillStyle = weapon.cosmic ? '#e040fb' : weapon.juggernaut ? '#ff4500' : weapon.electric ? '#44ddff' : weapon.fortune ? '#ffd700' : weapon.color;
+        ctx.strokeStyle = weapon.cosmic ? '#b8f0ff' : weapon.juggernaut ? '#ffd700' : weapon.electric ? '#e8f8ff' : weapon.fortune ? '#fff8dc' : '#ffffff';
         ctx.lineWidth = 2;
         if (weapon.cosmic) {
           ctx.shadowColor = '#40c4ff';
@@ -3607,6 +4796,12 @@ class BeatParryGame {
         } else if (weapon.fortune) {
           ctx.shadowColor = '#ff9900';
           ctx.shadowBlur = 10;
+        } else if (weapon.juggernaut) {
+          ctx.shadowColor = '#ff4500';
+          ctx.shadowBlur = 14;
+        } else if (weapon.electric) {
+          ctx.shadowColor = '#8866ff';
+          ctx.shadowBlur = 14;
         }
         ctx.fillRect(0, -3, gunLen, 6);
         ctx.strokeRect(0, -3, gunLen, 6);
@@ -3614,6 +4809,17 @@ class BeatParryGame {
           this.drawSparkStar(ctx, gunLen + 2, 0, 4, 0.8, performance.now() / 300);
         } else if (weapon.fortune) {
           this.drawFortuneSpark(ctx, gunLen + 2, 0, 3.5, 0.85, performance.now() / 250);
+        } else if (weapon.juggernaut) {
+          ctx.fillStyle = '#ffd700';
+          ctx.fillRect(gunLen - 2, -5, 6, 10);
+        } else if (weapon.electric) {
+          ctx.strokeStyle = '#8866ff';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(gunLen - 2, -4);
+          ctx.lineTo(gunLen + 4, 0);
+          ctx.lineTo(gunLen - 2, 4);
+          ctx.stroke();
         }
         ctx.restore();
 

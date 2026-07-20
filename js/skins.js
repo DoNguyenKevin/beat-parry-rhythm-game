@@ -104,6 +104,63 @@ const SKINS = {
       trail: true,
     },
   },
+  'skin-juggernaut': {
+    id: 'skin-juggernaut',
+    name: 'Juggernaut',
+    description: 'Rare invasion reward — Fortune-tier stats, +38 HP, hex-molten armor. Titan Overdrive & Void Crash with both OP skills. Weaker than Void God.',
+    price: 0,
+    tier: 5,
+    eventOnly: true,
+    effect: 'juggernaut',
+    icon: '⚙️',
+    colors: {
+      primary: '#2a0808',
+      glow: '#ff5500',
+      accent: '#ffdd55',
+      ring: '#aa2200',
+      core: '#ff7722',
+      plate: '#661111',
+      lava: '#ff3300',
+      slag: '#3d1810',
+    },
+    passives: {
+      scoreMult: 1.23,
+      rudMult: 1.18,
+      windowMult: 1.13,
+      comboCapBonus: 14,
+      dodgeHealthBonus: 38,
+      trail: true,
+      titanAbilities: true,
+    },
+  },
+  'skin-electric': {
+    id: 'skin-electric',
+    name: 'Electric',
+    description: 'Thunder Vault raid — below Juggernaut power. Unique skills: Hold Q Electric Beam & E Boom. No Overdrive / Void Dash while equipped. Volt Lance boss gun.',
+    price: 0,
+    tier: 5,
+    eventOnly: true,
+    effect: 'electric',
+    icon: '⚡',
+    colors: {
+      primary: '#0a1628',
+      glow: '#44ddff',
+      accent: '#e8f8ff',
+      ring: '#8866ff',
+      core: '#aaf0ff',
+      arc: '#cc88ff',
+      bolt: '#ffffff',
+    },
+    passives: {
+      scoreMult: 1.14,
+      rudMult: 1.1,
+      windowMult: 1.07,
+      comboCapBonus: 8,
+      dodgeHealthBonus: 22,
+      trail: true,
+      electricSkills: true,
+    },
+  },
 };
 
 const SKIN_EQUIPPED_KEY = 'beatParryEquippedSkin';
@@ -123,7 +180,12 @@ function formatSkinPassives(passives = {}, options = {}) {
   if (passives.rudMult) parts.push(`+${Math.round((passives.rudMult - 1) * 100)}% RUD`);
   if (passives.comboCapBonus) parts.push(`+${passives.comboCapBonus} combo cap`);
   if (passives.dodgeHealthBonus) parts.push(`+${passives.dodgeHealthBonus} dodge HP`);
-  if (passives.trail) parts.push(options.effect === 'fortune' ? 'golden trail' : 'void trail');
+  if (passives.trail) {
+    if (options.effect === 'fortune') parts.push('golden trail');
+    else if (options.effect === 'juggernaut') parts.push('molten slag trail');
+    else if (options.effect === 'electric') parts.push('lightning trail');
+    else parts.push('void trail');
+  }
   return parts.length ? parts.join(' · ') : 'No bonus';
 }
 
@@ -167,6 +229,7 @@ const Skins = {
       return true;
     }
     if (skin.secret && typeof Shop !== 'undefined' && Shop.isSecretUnlocked(skinId)) return true;
+    if (skin.eventOnly) return this.owned.includes(skinId);
     return this.owned.includes(skinId);
   },
 

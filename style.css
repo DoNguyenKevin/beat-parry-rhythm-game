@@ -605,6 +605,13 @@ h1 {
   box-shadow: 0 0 12px rgba(255, 215, 0, 0.32);
 }
 
+.ability-chip-juggernaut {
+  background: rgba(255, 69, 0, 0.18);
+  border-color: rgba(255, 140, 0, 0.55);
+  color: #ffcc88;
+  box-shadow: 0 0 12px rgba(255, 69, 0, 0.35);
+}
+
 #tab-dodge.active {
   background: linear-gradient(135deg, rgba(255, 107, 107, 0.22), rgba(255, 77, 157, 0.18));
   border-color: rgba(255, 107, 107, 0.5);
@@ -640,6 +647,193 @@ h1 {
 .boss-tag {
   background: rgba(199, 125, 255, 0.2);
   color: #e8c4ff;
+}
+
+.juggernaut-event-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 1rem 1.1rem;
+  margin-bottom: 0.75rem;
+  border-radius: 12px;
+  border: 1px dashed rgba(255, 85, 0, 0.45);
+  background: linear-gradient(135deg, rgba(60, 10, 0, 0.35), rgba(30, 5, 0, 0.2));
+  cursor: default;
+}
+
+.juggernaut-event-info.juggernaut-event-cleared {
+  border-color: rgba(255, 215, 0, 0.3);
+  opacity: 0.85;
+}
+
+.juggernaut-event-card {
+  border-color: rgba(255, 69, 0, 0.45);
+  background: linear-gradient(135deg, rgba(80, 0, 0, 0.35), rgba(40, 0, 0, 0.2));
+}
+
+.juggernaut-event-card:hover:not(.juggernaut-event-locked) {
+  border-color: rgba(255, 140, 0, 0.7);
+  box-shadow: 0 0 22px rgba(255, 69, 0, 0.28);
+}
+
+.juggernaut-event-card.juggernaut-event-locked {
+  opacity: 0.72;
+}
+
+.juggernaut-event-card.juggernaut-event-cleared {
+  border-color: rgba(255, 215, 0, 0.35);
+}
+
+.juggernaut-event-icon {
+  background: radial-gradient(circle at 35% 35%, #ffd700, #ff4500 55%, #5c0a0a) !important;
+  box-shadow: 0 0 16px rgba(255, 69, 0, 0.45);
+}
+
+.juggernaut-event-tag {
+  background: rgba(255, 69, 0, 0.25);
+  color: #ffcc88;
+}
+
+.shop-item-event {
+  border-color: rgba(255, 69, 0, 0.35);
+}
+
+.juggernaut-invasion-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+}
+
+.juggernaut-invasion-intro.active {
+  opacity: 1;
+}
+
+.juggernaut-invasion-intro-inner {
+  text-align: center;
+  transform: scale(0.85);
+  transition: transform 0.35s ease;
+}
+
+.juggernaut-invasion-intro.active .juggernaut-invasion-intro-inner {
+  transform: scale(1);
+}
+
+.juggernaut-invasion-intro-icon {
+  font-size: 3.5rem;
+  filter: drop-shadow(0 0 18px rgba(255, 85, 0, 0.8));
+  animation: juggernaut-pulse 0.8s ease-in-out infinite alternate;
+}
+
+.juggernaut-invasion-intro-title {
+  margin-top: 0.75rem;
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #ffdd55;
+  text-shadow: 0 0 20px rgba(255, 85, 0, 0.9);
+}
+
+.juggernaut-invasion-intro-sub {
+  margin-top: 0.5rem;
+  color: #ffaa77;
+  font-size: 1rem;
+}
+
+@keyframes juggernaut-pulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.08); }
+}
+
+.ability-chip-electric {
+  background: rgba(68, 221, 255, 0.16);
+  border-color: rgba(136, 102, 255, 0.55);
+  color: #aaf0ff;
+  box-shadow: 0 0 12px rgba(68, 221, 255, 0.35);
+}
+
+.electric-raid-card {
+  border-color: rgba(68, 221, 255, 0.35);
+  margin-bottom: 0.75rem;
+}
+
+.electric-raid-card:hover:not(.electric-raid-cleared) {
+  border-color: rgba(136, 102, 255, 0.55);
+  box-shadow: 0 0 20px rgba(68, 221, 255, 0.25);
+}
+
+.electric-raid-card.electric-raid-cleared {
+  opacity: 0.72;
+  cursor: default;
+}
+
+.electric-raid-icon {
+  background: radial-gradient(circle at 35% 30%, #e8f8ff, #44ddff 45%, #8866ff 75%, #0a1628);
+  box-shadow: 0 0 16px rgba(68, 221, 255, 0.45);
+}
+
+.electric-raid-tag {
+  background: rgba(68, 221, 255, 0.2);
+  color: #aaf0ff;
+}
+
+.electric-raid-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 12, 28, 0.88);
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  pointer-events: none;
+}
+
+.electric-raid-intro.active {
+  opacity: 1;
+}
+
+.electric-raid-intro-inner {
+  text-align: center;
+  transform: scale(0.85);
+  transition: transform 0.45s ease;
+}
+
+.electric-raid-intro.active .electric-raid-intro-inner {
+  transform: scale(1);
+}
+
+.electric-raid-intro-icon {
+  font-size: 4rem;
+  margin-bottom: 0.5rem;
+  animation: electric-pulse 0.7s ease-in-out infinite alternate;
+}
+
+.electric-raid-intro-title {
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #aaf0ff;
+  text-shadow: 0 0 24px rgba(68, 221, 255, 0.65);
+}
+
+.electric-raid-intro-sub {
+  margin-top: 0.5rem;
+  color: rgba(170, 200, 255, 0.85);
+  font-size: 0.95rem;
+}
+
+@keyframes electric-pulse {
+  from { transform: scale(1); filter: brightness(1); }
+  to { transform: scale(1.1); filter: brightness(1.25); }
 }
 
 .sounds-intro {

@@ -106,6 +106,58 @@ const BOSS_WEAPONS = {
     cosmic: true,
     pierce: true,
   },
+  'skin-juggernaut': {
+    id: 'siege-breaker',
+    name: 'Siege Breaker',
+    damage: 23,
+    fireRate: 0.14,
+    projectileSpeed: 1040,
+    projectileSize: 7,
+    color: '#ff5500',
+    glow: '#ffcc44',
+    spread: 0.04,
+    burst: 2,
+    juggernaut: true,
+  },
+  'skin-electric': {
+    id: 'volt-lance',
+    name: 'Volt Lance',
+    damage: 18,
+    fireRate: 0.16,
+    projectileSpeed: 980,
+    projectileSize: 6,
+    color: '#44ddff',
+    glow: '#cc88ff',
+    spread: 0.05,
+    burst: 2,
+    electric: true,
+  },
+};
+
+const JUGGERNAUT_BOSS = {
+  name: 'THE JUGGERNAUT',
+  color: '#ff2200',
+  glow: '#ff8800',
+  accent: '#ffd700',
+  radius: 78,
+  health: 8200,
+  signature: 'Armageddon Protocol',
+  attackInterval: 0.42,
+  projectileSpeedMult: 1.35,
+  minionBurstEvery: 2.8,
+};
+
+const ELECTRIC_RAID_BOSS = {
+  name: 'STORM COLOSSUS',
+  color: '#22ccff',
+  glow: '#aa66ff',
+  accent: '#e8f8ff',
+  radius: 86,
+  health: 12800,
+  signature: 'Hyperion Cascade',
+  attackInterval: 0.32,
+  projectileSpeedMult: 1.55,
+  minionBurstEvery: 1.9,
 };
 
 function createBossMode() {
@@ -114,6 +166,81 @@ function createBossMode() {
 
 function getBossWeapon(skinId) {
   return BOSS_WEAPONS[skinId] || BOSS_WEAPONS.default;
+}
+
+function createJuggernautBossState(centerX, canvasHeight) {
+  return {
+    x: centerX,
+    y: canvasHeight * 0.26,
+    radius: JUGGERNAUT_BOSS.radius,
+    health: JUGGERNAUT_BOSS.health,
+    maxHealth: JUGGERNAUT_BOSS.health,
+    name: JUGGERNAUT_BOSS.name,
+    color: JUGGERNAUT_BOSS.color,
+    glow: JUGGERNAUT_BOSS.glow,
+    accent: JUGGERNAUT_BOSS.accent,
+    round: 99,
+    signature: JUGGERNAUT_BOSS.signature,
+    wobblePhase: 0,
+    eyeCloseT: 0,
+    juggernaut: true,
+    platePhase: 0,
+    ragePulse: 0,
+  };
+}
+
+function getJuggernautRoundKit() {
+  return {
+    round: 99,
+    signature: JUGGERNAUT_BOSS.signature,
+    signatureType: 'summon',
+    attacks: [
+      { type: 'barrage', weight: 4 },
+      { type: 'spiral', weight: 4 },
+      { type: 'crossfire', weight: 4 },
+      { type: 'ring', weight: 3 },
+      { type: 'summon', weight: 6, minionType: 'brute', count: 3 },
+      { type: 'summon', weight: 5, minionType: 'hunter', count: 4 },
+      { type: 'summon', weight: 5, minionType: 'swarm', count: 10 },
+    ],
+  };
+}
+
+function createElectricRaidBossState(centerX, canvasHeight) {
+  return {
+    x: centerX,
+    y: canvasHeight * 0.24,
+    radius: ELECTRIC_RAID_BOSS.radius,
+    health: ELECTRIC_RAID_BOSS.health,
+    maxHealth: ELECTRIC_RAID_BOSS.health,
+    name: ELECTRIC_RAID_BOSS.name,
+    color: ELECTRIC_RAID_BOSS.color,
+    glow: ELECTRIC_RAID_BOSS.glow,
+    accent: ELECTRIC_RAID_BOSS.accent,
+    round: 100,
+    signature: ELECTRIC_RAID_BOSS.signature,
+    wobblePhase: 0,
+    eyeCloseT: 0,
+    electricRaid: true,
+    arcPhase: 0,
+  };
+}
+
+function getElectricRaidRoundKit() {
+  return {
+    round: 100,
+    signature: ELECTRIC_RAID_BOSS.signature,
+    signatureType: 'spiral',
+    attacks: [
+      { type: 'spiral', weight: 5 },
+      { type: 'barrage', weight: 5 },
+      { type: 'crossfire', weight: 5 },
+      { type: 'ring', weight: 4 },
+      { type: 'summon', weight: 7, minionType: 'hunter', count: 5 },
+      { type: 'summon', weight: 6, minionType: 'brute', count: 4 },
+      { type: 'summon', weight: 6, minionType: 'swarm', count: 12 },
+    ],
+  };
 }
 
 function getBossRoundHealth(round) {
